@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Новая вакансия — Skillaz Start</title>
+<link rel="stylesheet" href="../assets/styles.css" />
+<style>
+.sk-rte-body:empty:before { content: attr(data-ph); color: var(--sk-text-placeholder); }
+.sk-rte-body h3 { font: var(--sk-label-2); margin: 12px 0 6px; }
+.sk-rte-body h3:first-child { margin-top: 0; }
+.sk-rte-body p { margin: 0 0 8px; }
+.sk-rte-body ul, .sk-rte-body ol { margin: 4px 0 8px; padding-left: 22px; }
+.sk-rte-body a { color: var(--sk-text-accent); }
+/* Поля формы подписаны серым (--sk-text-secondary), а не чёрным — так в референсе.
+   Input/Select приходят из ds_bundle.js с чёрным цветом лейбла зашитым инлайн-стилем,
+   переопределить проще точечным CSS здесь, чем менять компонент ДС для всего прототипа. */
+.sk-vacancy-form label > span:first-child,
+.sk-vacancy-form [style*="position: relative"] > span:first-child {
+  color: var(--sk-text-secondary) !important;
+}
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<script src="../assets/ds_bundle.js"></script>
+<script src="../assets/data.js"></script>
+<script type="text/babel" src="../assets/shell.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { Tag, Divider, Avatar, Input, Select, Button, Modal, Snackbar, IconButton } = window.SkillazCoreDesignSystem_bf9566;
+const { AppShell, Icons } = window.Site;
+const { IconArrowLeft, IconChevronDown, IconLink2 } = Icons;
+const D = window.SITE_DATA;
+const DEPARTMENT_OPTIONS = [...new Set(D.vacancies.map((v) => v.department))].sort();
+
+const SECTIONS = [
+  { key: "basic", label: "Основное" },
+  { key: "description", label: "Описание" },
+  { key: "params", label: "Параметры" },
+  { key: "publish", label: "Контакт для связи" },
+];
+
+// Поле навыков — теги с крестиком-удалением (Tag.onRemove уже есть в ДС) плюс
+// текстовое поле в том же контуре: Enter/запятая добавляют тег, как на большинстве
+// джоббордов, без отдельной кнопки "Добавить".
+function SkillTagInput({ value, onChange }) {
+  const [draft, setDraft] = React.useState("");
+  function commit() {
+    const v = draft.trim();
+    if (v && !value.includes(v)) onChange([...value, v]);
+    setDraft("");
+  }
+  return (
+    <div className="sk-row sk-gap-2" style={{
+      flexWrap: "wrap", alignItems: "center", minHeight: 48, padding: "8px 10px", boxSizing: "border-box",
+      borderRadius: "var(--sk-radius-form)", background: "var(--sk-surface-page)",
+      boxShadow: "inset 0 0 0 1px var(--sk-stroke)",
+    }}>
+      {value.map((s) => (
+        <Tag key={s} size="s" hue="gray" onRemove={() => onChange(value.filter((x) => x !== s))}>{s}</Tag>
+      ))}
+      <input value={draft} onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Return" || e.key === ",") { e.preventDefault(); commit(); } }}
+        onBlur={commit} placeholder="Добавить навык…" style={{
+          flex: 1, minWidth: 140, border: "none", outline: "none", background: "transparent",
+          font: "400 14px/20px var(--sk-font-ui)", color: "var(--sk-text-primary)",
+        }} />
+    </div>
+  );
+}
+
+// HTML-редактор описания вакансии — в экспорте Skillgrid нет готового rich-text
+// компонента (только Textarea для простого текста), поэтому здесь свой contentEditable
+// с панелью инструментов (стиль текста, начертание, списки, ссылка), но в той же
+// "коробке" из ДС (радиус формы, обводка, состояние фокуса), что и остальные поля формы.
+// Value/onChange работают со строкой HTML, а не с текстом — HR сам оформляет разделы
+// (Обязанности/Требования/Условия) заголовками через панель, отдельных полей под них нет.
+function RichTextEditor({ label, required, helper, placeholder, value, onChange, minHeight = 220 }) {
+  const ref = React.useRef(null);
+  const [focus, setFocus] = React.useState(false);
+  React.useEffect(() => {
+    if (ref.current && ref.current.innerHTML !== (value || "")) ref.current.innerHTML = value || "";
+    // eslint-disable-next-line
+  }, []);
+  function commit() { onChange(ref.current.innerHTML); }
+  function exec(cmd, val) {
+    ref.current && ref.current.focus();
+    document.execCommand(cmd, false, val);
+    commit();
+  }
+  function insertLink() {
+    const url = window.prompt("Ссылка (https://…)");
+    if (url) exec("createLink", url);
+  }
+  function ToolbarButton({ onAction, title, children }) {
+    return (
+      <button type="button" title={title} onMouseDown={(e) => e.preventDefault()} onClick={onAction} style={{
+        minWidth: 28, height: 28, padding: "0 6px", display: "inline-flex", alignItems: "center", justifyContent: "center",
+        border: "none", borderRadius: 6, background: "transparent", cursor: "pointer",
+        color: "var(--sk-text-secondary)", font: "600 13px/1 var(--sk-font-ui)",
+      }}>
+        {children}
+      </button>
+    );
+  }
+  const ToolbarDivider = () => <div style={{ width: 1, height: 18, background: "var(--sk-stroke)", margin: "0 2px" }} />;
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {label && (
+        <span style={{ font: "var(--sk-label-3)", color: "var(--sk-text-primary)" }}>
+          {label}{required && <span style={{ color: "var(--sk-text-negative)" }}> *</span>}
+        </span>
+      )}
+      <div style={{
+        borderRadius: "var(--sk-radius-form)", background: "var(--sk-surface-page)",
+        boxShadow: `inset 0 0 0 ${focus ? 2 : 1}px ${focus ? "var(--sk-stroke-accent)" : "var(--sk-stroke)"}`,
+        transition: "box-shadow var(--sk-duration) var(--sk-ease)",
+      }}>
+        <div className="sk-row sk-gap-1" style={{ padding: "4px 6px", borderBottom: "1px solid var(--sk-stroke)", alignItems: "center", flexWrap: "wrap" }}>
+          <select onChange={(e) => { exec("formatBlock", e.target.value || "P"); e.target.value = ""; }} defaultValue="" style={{
+            border: "none", background: "transparent", font: "var(--sk-label-4-regular)", color: "var(--sk-text-secondary)",
+            padding: "4px 6px", borderRadius: 6, cursor: "pointer", outline: "none",
+          }}>
+            <option value="">Обычный текст</option>
+            <option value="H3">Заголовок</option>
+          </select>
+          <ToolbarDivider />
+          <ToolbarButton onAction={() => exec("bold")} title="Жирный">B</ToolbarButton>
+          <ToolbarButton onAction={() => exec("italic")} title="Курсив"><span style={{ fontStyle: "italic" }}>I</span></ToolbarButton>
+          <ToolbarButton onAction={() => exec("underline")} title="Подчёркнутый"><span style={{ textDecoration: "underline" }}>U</span></ToolbarButton>
+          <ToolbarDivider />
+          <ToolbarButton onAction={() => exec("insertUnorderedList")} title="Маркированный список">•—</ToolbarButton>
+          <ToolbarButton onAction={() => exec("insertOrderedList")} title="Нумерованный список">1.—</ToolbarButton>
+          <ToolbarDivider />
+          <ToolbarButton onAction={insertLink} title="Ссылка"><IconLink2 size={15} /></ToolbarButton>
+        </div>
+        <div ref={ref} contentEditable suppressContentEditableWarning className="sk-rte-body"
+          data-ph={placeholder || ""}
+          onFocus={() => setFocus(true)}
+          onBlur={() => setFocus(false)}
+          onInput={commit}
+          style={{ minHeight, padding: 12, outline: "none", font: "400 14px/20px var(--sk-font-ui)", color: "var(--sk-text-primary)" }}
+        />
+      </div>
+      {helper && <span style={{ font: "var(--sk-label-4-regular)", letterSpacing: "0.01em", color: "var(--sk-text-secondary)" }}>{helper}</span>}
+    </label>
+  );
+}
+
+// Пикер рекрутёра-контакта — тот же паттерн клика-вне-закрывает, что и у FilterChip/Select
+// в других формах прототипа; список вариантов собран из уже существующих рекрутёров вакансий,
+// отдельного справочника рекрутёров в данных прототипа нет.
+function RecruiterPicker({ value, options, onChange }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button type="button" onClick={() => setOpen((o) => !o)} className="sk-row sk-gap-3 sk-clickable" style={{
+        alignItems: "center", width: "100%", padding: "10px 12px", cursor: "pointer",
+        boxShadow: open ? "inset 0 0 0 2px var(--sk-stroke-accent)" : "none",
+        borderRadius: "var(--sk-radius-form)", background: "var(--sk-surface-secondary)", border: "none",
+      }}>
+        <Avatar name={value.name} size={36} />
+        <div className="sk-col" style={{ flex: 1, gap: 0, textAlign: "left" }}>
+          <div className="sk-label-3">{value.name}</div>
+          <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>{value.role}</div>
+        </div>
+        <IconChevronDown size={16} style={{ opacity: 0.55, transform: open ? "rotate(180deg)" : "none", transition: "transform var(--sk-duration) var(--sk-ease)" }} />
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 20, maxHeight: 260, overflowY: "auto",
+          background: "var(--sk-surface-page)", borderRadius: "var(--sk-radius-2)", boxShadow: "var(--sk-shadow-m)", padding: 6,
+        }}>
+          {options.map((o) => (
+            <button key={o.email} type="button" onClick={() => { onChange(o); setOpen(false); }} className="sk-row sk-gap-3 sk-clickable" style={{
+              width: "100%", padding: "8px 10px", border: "none", cursor: "pointer", alignItems: "center", textAlign: "left",
+              borderRadius: "var(--sk-radius-2)", background: o.email === value.email ? "var(--sk-surface-secondary)" : "transparent",
+            }}>
+              <Avatar name={o.name} size={28} />
+              <div className="sk-col" style={{ gap: 0 }}>
+                <div className="sk-label-4">{o.name}</div>
+                <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>{o.role}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Page() {
+  const recruiterOptions = React.useMemo(() => {
+    const map = new Map();
+    D.vacancies.forEach((v) => { if (v.recruiter && !map.has(v.recruiter.email)) map.set(v.recruiter.email, v.recruiter); });
+    return [...map.values()];
+  }, []);
+
+  const [form, setForm] = React.useState({
+    title: "", direction: D.directions[0], department: DEPARTMENT_OPTIONS[0], skills: [],
+    responsibilities: "", requirements: "", conditions: "",
+    city: D.cities[0], format: D.workFormats[0], employment: D.employmentTypes[0],
+    grade: "", experience: D.experienceOptions[0], salaryFrom: "", salaryTo: "",
+    recruiter: recruiterOptions[0],
+  });
+  const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
+  const [toast, setToast] = React.useState(null);
+  const [confirmOpen, setConfirmOpen] = React.useState(false);
+  const [activeSection, setActiveSection] = React.useState("basic");
+  const sectionRefs = { basic: React.useRef(), description: React.useRef(), params: React.useRef(), publish: React.useRef() };
+
+  // Скроллспай по секциям формы: активный пункт справа подсвечивается по тому, какая
+  // секция сейчас ближе всего к верху видимой области — так навигация справа отражает
+  // реальную прокрутку, а не просто фиксируется на первом пункте.
+  React.useEffect(() => {
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => { if (e.isIntersecting) setActiveSection(e.target.dataset.section); });
+    }, { rootMargin: "-15% 0px -70% 0px" });
+    Object.values(sectionRefs).forEach((r) => r.current && io.observe(r.current));
+    return () => io.disconnect();
+  }, []);
+
+  function scrollToSection(key) {
+    sectionRefs[key].current && sectionRefs[key].current.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  const valid = form.title.trim() && form.responsibilities.trim() && form.requirements.trim();
+
+  function showToast(msg) { setToast(msg); window.setTimeout(() => setToast(null), 2400); }
+  function saveDraft() { showToast("Черновик сохранён"); }
+  function publish() {
+    setConfirmOpen(false);
+    showToast("Вакансия опубликована");
+    window.setTimeout(() => { window.location.href = "vacancies-manage.html"; }, 900);
+  }
+
+  return (
+    <AppShell role="hr" active="vacancies" base=".."
+      breadcrumb={
+        <IconButton size="s" variant="gray" mode="tertiary" title="Назад" onClick={() => { window.location.href = "vacancies-manage.html"; }}>
+          <IconArrowLeft size={16} />
+        </IconButton>
+      }>
+      <div className="sk-row sk-gap-2" style={{ justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
+        <div className="sk-row sk-gap-2" style={{ alignItems: "center" }}>
+          <div className="sk-title-4">Новая вакансия</div>
+          <Tag size="s" hue="neutral">Черновик</Tag>
+        </div>
+        <div className="sk-row sk-gap-2">
+          <Button mode="secondary" onClick={saveDraft}>Сохранить черновик</Button>
+          <Button variant="accent" disabled={!valid} onClick={() => setConfirmOpen(true)}>Опубликовать</Button>
+        </div>
+      </div>
+
+      <div className="sk-row" style={{ alignItems: "flex-start", gap: 40 }}>
+        <div className="sk-vacancy-form sk-col sk-gap-6" style={{ flex: 1, minWidth: 0, maxWidth: 720 }}>
+
+          <div ref={sectionRefs.basic} data-section="basic" className="sk-col sk-gap-3">
+            <div className="sk-label-2">Основное</div>
+            <Input label="Название вакансии" required placeholder="Например, специалист контактного центра"
+              value={form.title} onChange={(e) => set("title")(e.target.value || "")} />
+            <div className="sk-row sk-gap-3">
+              <Select label="Направление" value={form.direction} options={D.directions.map((d) => ({ value: d, label: d }))}
+                onChange={set("direction")} style={{ flex: 1, minWidth: 0 }} />
+              <Select label="Подразделение" value={form.department} options={DEPARTMENT_OPTIONS.map((d) => ({ value: d, label: d }))}
+                onChange={set("department")} style={{ flex: 1, minWidth: 0 }} />
+            </div>
+            <div className="sk-col sk-gap-2">
+              <div className="sk-label-3" style={{ color: "var(--sk-text-secondary)" }}>Ключевые навыки</div>
+              <SkillTagInput value={form.skills} onChange={set("skills")} />
+              <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>После указания навыка нажмите «Enter»</div>
+            </div>
+          </div>
+
+          <Divider />
+
+          <div ref={sectionRefs.description} data-section="description" className="sk-col sk-gap-4">
+            <div className="sk-label-2">Описание</div>
+            <RichTextEditor label="Обязанности" required
+              placeholder="Чем предстоит заниматься на этой позиции"
+              value={form.responsibilities} onChange={set("responsibilities")} minHeight={140} />
+            <RichTextEditor label="Требования" required
+              placeholder="Опыт, знания и навыки, которые нужны для этой роли"
+              value={form.requirements} onChange={set("requirements")} minHeight={140} />
+            <RichTextEditor label="Условия"
+              placeholder="Формат работы, соцпакет, обучение — необязательно, но повышает отклик"
+              value={form.conditions} onChange={set("conditions")} minHeight={100} />
+          </div>
+
+          <Divider />
+
+          <div ref={sectionRefs.params} data-section="params" className="sk-col sk-gap-4">
+            <div className="sk-label-2">Параметры</div>
+            <div className="sk-col sk-gap-2">
+              <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Локация и формат</div>
+              <div className="sk-row sk-gap-3" style={{ flexWrap: "wrap" }}>
+                <Select label="Город" value={form.city} options={D.cities.map((c) => ({ value: c, label: c }))} onChange={set("city")} style={{ flex: "1 1 160px", minWidth: 0 }} />
+                <Select label="Формат работы" value={form.format} options={D.workFormats.map((f) => ({ value: f, label: f }))} onChange={set("format")} style={{ flex: "1 1 160px", minWidth: 0 }} />
+                <Select label="Тип занятости" value={form.employment} options={D.employmentTypes.map((e) => ({ value: e, label: e }))} onChange={set("employment")} style={{ flex: "1 1 160px", minWidth: 0 }} />
+              </div>
+            </div>
+            <div className="sk-col sk-gap-2">
+              <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Уровень и вилка</div>
+              <div className="sk-row sk-gap-3" style={{ flexWrap: "wrap" }}>
+                <Input label="Грейд" placeholder="Junior / Middle / Senior" value={form.grade} onChange={(e) => set("grade")(e.target.value || "")} style={{ flex: "1 1 160px", minWidth: 0 }} />
+                <Select label="Опыт" value={form.experience} options={D.experienceOptions.map((e) => ({ value: e, label: e }))} onChange={set("experience")} style={{ flex: "1 1 160px", minWidth: 0 }} />
+                <Input label="Оклад от" type="number" value={form.salaryFrom} onChange={(e) => set("salaryFrom")(e.target.value)} style={{ flex: "1 1 160px", minWidth: 0 }} />
+                <Input label="Оклад до" type="number" value={form.salaryTo} onChange={(e) => set("salaryTo")(e.target.value)} style={{ flex: "1 1 160px", minWidth: 0 }} />
+              </div>
+            </div>
+          </div>
+
+          <Divider />
+
+          <div ref={sectionRefs.publish} data-section="publish" className="sk-col sk-gap-3">
+            <div className="sk-label-2">Контакт для связи</div>
+            <div className="sk-col sk-gap-2" style={{ maxWidth: 360 }}>
+              <RecruiterPicker value={form.recruiter} options={recruiterOptions} onChange={set("recruiter")} />
+            </div>
+          </div>
+
+        </div>
+
+        <div style={{ width: 200, flexShrink: 0, position: "sticky", top: 24 }}>
+          <div className="sk-col sk-gap-3">
+            <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              На этой странице
+            </div>
+            <div className="sk-col sk-gap-1">
+              {SECTIONS.map((s) => (
+                <button key={s.key} type="button" onClick={() => scrollToSection(s.key)} className="sk-clickable" style={{
+                  textAlign: "left", padding: "6px 10px", margin: "0 -10px", width: "calc(100% + 20px)",
+                  border: "none", cursor: "pointer", borderRadius: "var(--sk-radius-2)",
+                  background: activeSection === s.key ? "var(--sk-accent-secondary)" : "transparent",
+                  font: activeSection === s.key ? "var(--sk-label-3)" : "var(--sk-label-3-regular)",
+                  color: activeSection === s.key ? "var(--sk-text-accent)" : "var(--sk-text-secondary)",
+                }}>
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {confirmOpen && (
+        <Modal open title="Опубликовать вакансию?" onClose={() => setConfirmOpen(false)} size="s"
+          secondary={<Button mode="secondary" onClick={() => setConfirmOpen(false)}>Отмена</Button>}
+          primary={<Button variant="accent" onClick={publish}>Опубликовать</Button>}>
+          <div className="sk-col sk-gap-1">
+            <div>Вакансия сразу станет видна сотрудникам на витрине и будет доступна для откликов.</div>
+            <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>Отменить публикацию можно позже — вакансию можно скрыть от сотрудников в любой момент из списка управления вакансиями.</div>
+          </div>
+        </Modal>
+      )}
+
+      {toast && (
+        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", zIndex: 100 }}>
+          <Snackbar>{toast}</Snackbar>
+        </div>
+      )}
+    </AppShell>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Page />);
+</script>
+</body>
+</html>

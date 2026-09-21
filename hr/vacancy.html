@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Вакансия — Skillaz Start</title>
+<link rel="stylesheet" href="../assets/styles.css" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<script src="../assets/ds_bundle.js"></script>
+<script src="../assets/data.js"></script>
+<script type="text/babel" src="../assets/shell.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { Card, Tag, TextList, Divider, Modal, Input, Textarea, Select, Button, IconButton, Avatar, Snackbar, Alert } = window.SkillazCoreDesignSystem_bf9566;
+const { AppShell, Icons } = window.Site;
+const { IconArrowLeft, IconMail, IconPhone, IconUpload, IconFileText, IconTarget, IconCheck, IconGift, IconLayers, IconPlusSm, IconSparklesSolid, IconUser, IconChevronRight } = Icons;
+const D = window.SITE_DATA;
+
+const RELATION_OPTIONS = [
+  { value: "colleague_former", label: "Бывший коллега" },
+  { value: "colleague_other_company", label: "Коллега из другой компании" },
+  { value: "friend", label: "Друг / знакомый" },
+  { value: "relative", label: "Родственник" },
+  { value: "other", label: "Другое" },
+];
+
+function fmtMoney(n) { return n.toLocaleString("ru-RU"); }
+function vacancyIdFromUrl() {
+  const id = new URLSearchParams(window.location.search).get("id");
+  return D.vacancies.find(v => v.id === id) ? id : D.vacancies[0].id;
+}
+
+function DetailRow({ label, value }) {
+  return (
+    <div className="sk-row" style={{ justifyContent: "space-between", padding: "6px 0" }}>
+      <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>{label}</span>
+      <span className="sk-label-4">{value}</span>
+    </div>
+  );
+}
+
+function MatchTag({ percent, compact }) {
+  return (
+    <Tag size="s" style={{ background: "var(--sk-special-secondary)", color: "rgb(117,59,233)", flexShrink: 0 }}>
+      {compact ? `${percent}%` : `Подходит на ${percent}%`}
+    </Tag>
+  );
+}
+
+// Кандидат из кадрового резерва (заранее отобран HR/руководителем под роль или как
+// высокопотенциальный сотрудник) — помечен голубым тегом "Резервист" прямо в общем
+// списке кандидатов, рядом с AI-процентом (если он тоже есть), а не отдельным списком.
+function ReserveTag() {
+  return (
+    <Tag size="s" hue="info" style={{ flexShrink: 0, alignSelf: "flex-start" }}>
+      Резервист
+    </Tag>
+  );
+}
+
+// "Карьерный трек" — единственная категория факта на карточке, которая не связана с
+// AI-подбором под конкретную вакансию (в отличие от Компетенций/Результативности, у
+// него нет фиолетовой звёздочки): это статус от HR, а не расчёт системы.
+function CareerTrackCard({ e }) {
+  return (
+    <Card bordered>
+      <div className="sk-col sk-gap-1">
+        <div className="sk-label-4">Карьерный трек</div>
+        <div className="sk-label-3-regular">
+          {e.targetRole ? <>В кадровом резерве на роль «{e.targetRole}»</> : "В общем кадровом резерве компании"}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+// Для кандидата без статуса резервиста показываем вместо этого сильнейшую причину
+// AI-подбора — одной строкой, не списком (список дублировал бы теги компетенций ниже).
+function MatchReasonNote({ reason }) {
+  return (
+    <div className="sk-row sk-gap-2" style={{ alignItems: "flex-start" }}>
+      <IconSparklesSolid size={14} color="rgb(117,59,233)" style={{ marginTop: 2, flexShrink: 0 }} />
+      <span className="sk-label-4-regular" style={{ color: "var(--sk-text-secondary)" }}>{reason}</span>
+    </div>
+  );
+}
+
+// StatTile с необязательной ссылкой (Оценка 360 → отчёт 360, Performance review → сам review) —
+// шеврон рядом со значением показывает, что в показатель можно провалиться глубже.
+function StatTile({ value, label, href }) {
+  const content = (
+    <React.Fragment>
+      <div className="sk-row sk-gap-1" style={{ justifyContent: "center", alignItems: "center" }}>
+        <div className="sk-label-3">{value}</div>
+        {href && <IconChevronRight size={12} color="var(--sk-icon-secondary)" />}
+      </div>
+      <div style={{ font: "var(--sk-label-4-regular)", fontSize: 14, color: "var(--sk-text-secondary)", marginTop: 2 }}>{label}</div>
+    </React.Fragment>
+  );
+  const style = { flex: 1, gap: 2, background: "var(--sk-surface-secondary)", borderRadius: 10, padding: "14px 8px", textAlign: "center" };
+  if (href) {
+    return <a href={href} className="sk-col sk-clickable" style={{ ...style, textDecoration: "none", color: "inherit" }}>{content}</a>;
+  }
+  return <div className="sk-col" style={style}>{content}</div>;
+}
+
+function CandidateDetail({ e, vacancy }) {
+  const matchedSkills = (vacancy.requiredSkills || []).filter(s => e.skillScores && e.skillScores[s] != null);
+  const growthSkills = (e.growthSkills || []).filter(s => (vacancy.requiredSkills || []).includes(s));
+  return (
+    <div className="sk-col sk-gap-3">
+      <div className="sk-row" style={{ alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
+        <div className="sk-row sk-gap-3" style={{ alignItems: "center" }}>
+          <Avatar name={e.name} size={52} />
+          <div className="sk-col" style={{ gap: 2 }}>
+            <div className="sk-label-3">{e.name}</div>
+            <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>
+              {e.position} · {e.department}{e.tenure ? ` · Стаж ${e.tenure}` : ""}
+            </div>
+          </div>
+        </div>
+        <a href="../stub.html?role=hr&section=profile" className="sk-row sk-gap-1 sk-label-4-regular sk-clickable"
+          style={{ color: "var(--sk-text-accent)", alignItems: "center", textDecoration: "none", whiteSpace: "nowrap", flexShrink: 0 }}>
+          В профиль<IconChevronRight size={14} color="var(--sk-icon-accent)" />
+        </a>
+      </div>
+
+      {e.matchPercent != null && (
+        <div className="sk-label-3" style={{ color: "rgb(117,59,233)", fontWeight: 800 }}>
+          ✦ На {e.matchPercent}% подходит под вакансию
+        </div>
+      )}
+
+      {e.source === "reserve"
+        ? <CareerTrackCard e={e} />
+        : (e.matchReasons && e.matchReasons[0] && <MatchReasonNote reason={e.matchReasons[0]} />)}
+
+      <Card bordered>
+        <div className="sk-col sk-gap-2">
+          <div className="sk-row sk-gap-1 sk-label-4" style={{ alignItems: "center" }}>
+            <span style={{ color: "rgb(117,59,233)" }}>✦</span> Компетенции
+          </div>
+          {matchedSkills.length > 0 && (
+            <div className="sk-col sk-gap-1">
+              <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>Владеет</div>
+              <div className="sk-row sk-gap-1" style={{ flexWrap: "wrap" }}>
+                {matchedSkills.map((s, i) => (
+                  <Tag key={i} size="s" hue="positive">
+                    {s} · {e.skillScores[s]}
+                  </Tag>
+                ))}
+              </div>
+            </div>
+          )}
+          {growthSkills.length > 0 && (
+            <div className="sk-col sk-gap-1">
+              <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>Указал в интересах · есть в требованиях роли</div>
+              <div className="sk-row sk-gap-1" style={{ flexWrap: "wrap" }}>
+                {growthSkills.map((s, i) => <Tag key={i} size="s" hue="warning">{s}</Tag>)}
+              </div>
+            </div>
+          )}
+          {e.missingSkills && e.missingSkills.length > 0 && (
+            <div className="sk-col sk-gap-1">
+              <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>Требует развития</div>
+              <div className="sk-row sk-gap-1" style={{ flexWrap: "wrap" }}>
+                {e.missingSkills.map((s, i) => <Tag key={i} size="s" style={{ background: "var(--sk-surface-secondary)" }}>{s}</Tag>)}
+              </div>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      <Card bordered>
+        <div className="sk-col sk-gap-2">
+          <div className="sk-row sk-gap-1 sk-label-4" style={{ alignItems: "center" }}>
+            <span style={{ color: "rgb(117,59,233)" }}>✦</span> Результативность
+          </div>
+          <div className="sk-row sk-gap-2">
+            {e.score360 != null && <StatTile value={`${e.score360} из 5`} label="Оценка 360" href="../stub.html?role=hr&section=report360" />}
+            {e.perfReview != null && <StatTile value={`${e.perfReview} из 5`} label="Performance review" href="../stub.html?role=hr&section=performance-review" />}
+            {e.kpi != null && <StatTile value={`${e.kpi}%`} label="KPI" />}
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function CandidateRow({ e, index, isFirst, onOpenOne }) {
+  return (
+    <button type="button" onClick={() => onOpenOne(index)} className="sk-row sk-gap-2 sk-clickable" style={{
+      alignItems: "flex-start", width: "100%", padding: "8px 0", border: "none", background: "none", cursor: "pointer", textAlign: "left",
+      borderTop: isFirst ? "none" : "1px solid var(--sk-stroke)",
+    }}>
+      <Avatar name={e.name} size={28} />
+      <div className="sk-col" style={{ flex: 1, gap: 2, minWidth: 0 }}>
+        <div className="sk-row sk-gap-2" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <div className="sk-label-4" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.name}</div>
+          {e.matchPercent != null && <MatchTag percent={e.matchPercent} compact />}
+        </div>
+        <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.position}</div>
+        {e.source === "reserve" && <ReserveTag />}
+      </div>
+    </button>
+  );
+}
+
+// Карточка "Подходящие кандидаты" — только у HR, первым блоком в сайдбаре (см. запрос:
+// страница вакансии такая же, как у Сотрудника, плюс этот блок сверху). Компактный
+// список (аватар, имя, должность, процент). Клик по строке открывает карточку
+// конкретного кандидата с причинами подбора. Резервисты не вынесены отдельно —
+// помечены голубым тегом "Резервист" прямо в общем списке.
+function MatchingCandidatesCard({ employees, onOpenOne }) {
+  return (
+    <Card bordered>
+      <div className="sk-col sk-gap-1">
+        <div className="sk-row sk-gap-2 sk-label-3" style={{ color: "rgb(117,59,233)" }}>
+          <IconSparklesSolid size={16} color="rgb(117,59,233)" />Подходящие кандидаты
+        </div>
+        <div className="sk-col">
+          {employees.map((e, i) => (
+            <CandidateRow key={i} e={e} index={i} isFirst={i === 0} onOpenOne={onOpenOne} />
+          ))}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function Page() {
+  const vacancy = D.vacancies.find(v => v.id === vacancyIdFromUrl());
+  const closed = vacancy.status === "closed";
+  const matches = vacancy.matchingEmployees || [];
+  const [openCandidate, setOpenCandidate] = React.useState(null);
+  const [responses, setResponses] = React.useState(D.myResponses);
+  const [modalOpen, setModalOpen] = React.useState(false);
+  const [recommendOpen, setRecommendOpen] = React.useState(false);
+  const [aiDraftLetter, setAiDraftLetter] = React.useState("");
+  const [toast, setToast] = React.useState(null);
+  const myResponse = responses.find(r => r.vacancyId === vacancy.id);
+
+  function showToast(msg) {
+    setToast(msg);
+    window.setTimeout(() => setToast(null), 3200);
+  }
+
+  // Мостик для общего AI-виджета (assets/shell.js): открывает форму отклика с
+  // уже подставленным черновиком мотивационного письма — резюме прикрепляет сам
+  // сотрудник, отправляет тоже сам.
+  React.useEffect(() => {
+    window.__skAiOpenApplyModal = (letterText) => { setAiDraftLetter(letterText || ""); setModalOpen(true); };
+    return () => { delete window.__skAiOpenApplyModal; };
+  }, []);
+
+  // Переход из AI-виджета на витрине вакансий (кнопка "Откликнуться" в карточке
+  // с матчем, после подтверждения "Да, заполни") — сразу открываем форму с
+  // черновиком, без повторного вопроса: подтверждение уже было в чате.
+  React.useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("aiApply") !== "1") return;
+    if (closed || myResponse) {
+      showToast(closed ? "Вакансия уже закрыта — отклик отправить нельзя." : "Вы уже откликались на эту вакансию.");
+      return;
+    }
+    setAiDraftLetter(window.Site.AI.vacancyLetterDraft(vacancy));
+    setModalOpen(true);
+  }, []);
+
+  function handleSubmitted() {
+    setResponses(rs => [...rs, { vacancyId: vacancy.id, date: "12.03.26", status: "response_received" }]);
+    setModalOpen(false);
+    showToast("Отклик отправлен. Уведомим вас об изменении статуса.");
+  }
+
+  function handleRecommendSubmitted() {
+    setRecommendOpen(false);
+    showToast("Рекомендация отправлена рекрутёру " + vacancy.recruiter.name + ".");
+  }
+
+  // Рекрутёр сам создаёт отклик по подходящему кандидату (из AI-подбора или кадрового
+  // резерва) — источник в ATS фиксируется как "Внутренний кандидат", без обращения к
+  // самому сотруднику, в отличие от обычного отклика через "Откликнуться".
+  function handleCreateResponseFromCandidate(candidate) {
+    setOpenCandidate(null);
+    showToast("Отклик по кандидату " + candidate.name + " создан в ATS с источником «Внутренний кандидат».");
+  }
+
+  const ApplyCta = () => {
+    if (closed) return <Button disabled>Вакансия закрыта</Button>;
+    if (myResponse) return (
+      <a href="../employee/my-responses.html" style={{ textDecoration: "none" }}>
+        <Button mode="secondary" icon={<IconCheck size={16} />}>Отклик отправлен</Button>
+      </a>
+    );
+    return <Button variant="accent" onClick={() => setModalOpen(true)}>Откликнуться</Button>;
+  };
+
+  return (
+    <AppShell role="hr" active="vacancies" base=".."
+      breadcrumb={
+        <div className="sk-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <IconButton size="s" variant="gray" mode="tertiary" title="Назад" onClick={() => { window.location.href = "vacancies-manage.html"; }}>
+            <IconArrowLeft size={16} />
+          </IconButton>
+          {!closed && <span>{vacancy.postedDate}</span>}
+        </div>
+      }>
+      <div className="sk-row" style={{
+        justifyContent: "space-between", alignItems: "flex-start",
+        position: "sticky", top: 0, zIndex: 5, background: "var(--sk-surface-page)",
+      }}>
+        <div className="sk-col sk-gap-2" style={{ flex: 1 }}>
+          <div className="sk-row sk-gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
+            <div className="sk-title-4">{vacancy.title}</div>
+            <Tag size="s" hue="gray">{vacancy.transitionType}</Tag>
+            {closed
+              ? <Tag size="s" hue="neutral">Закрыта</Tag>
+              : <Tag size="s" hue="positive" icon={<IconCheck size={12} />}>Идёт поиск</Tag>}
+          </div>
+          <div className="sk-label-1" style={{ color: "var(--sk-text-primary)" }}>
+            {vacancy.salaryFrom && vacancy.salaryTo ? `${fmtMoney(vacancy.salaryFrom)} – ${fmtMoney(vacancy.salaryTo)} ₽` : "По договорённости"}
+          </div>
+        </div>
+        <div className="sk-row sk-gap-2">
+          {!closed && <Button variant="accent" mode="secondary" icon={<IconUser size={16} />} onClick={() => setRecommendOpen(true)}>Рекомендовать</Button>}
+          <ApplyCta />
+        </div>
+      </div>
+
+      {closed && (
+        <Alert hue="neutral" title="Эта вакансия закрыта">Отбор по ней завершён, отклик недоступен.</Alert>
+      )}
+
+      <div className="sk-row" style={{ alignItems: "flex-start", gap: 24 }}>
+        <div className="sk-col sk-gap-5" style={{ flex: 1, minWidth: 0 }}>
+          <Card bordered>
+            <div className="sk-col sk-gap-3">
+              <div className="sk-row sk-gap-2 sk-label-2"><IconTarget size={18} color="var(--sk-icon-accent)" />Чем предстоит заниматься</div>
+              <TextList items={vacancy.responsibilities} />
+            </div>
+          </Card>
+          <Card bordered>
+            <div className="sk-col sk-gap-3">
+              <div className="sk-row sk-gap-2 sk-label-2"><IconCheck size={18} color="var(--sk-icon-accent)" />Требования</div>
+              <TextList items={vacancy.requirements} />
+            </div>
+          </Card>
+          <Card bordered>
+            <div className="sk-col sk-gap-3">
+              <div className="sk-row sk-gap-2 sk-label-2"><IconGift size={18} color="var(--sk-icon-accent)" />Условия</div>
+              <TextList items={vacancy.conditions} />
+            </div>
+          </Card>
+          <Card bordered>
+            <div className="sk-col sk-gap-3">
+              <div className="sk-row sk-gap-2 sk-label-2"><IconLayers size={18} color="var(--sk-icon-accent)" />Ключевые навыки</div>
+              <div className="sk-row sk-gap-2" style={{ flexWrap: "wrap" }}>
+                {vacancy.requiredSkills.map((s, i) => <Tag key={i} size="s" hue="gray">{s}</Tag>)}
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        <div className="sk-col sk-gap-5" style={{ width: 300, flexShrink: 0 }}>
+          {matches.length > 0 && (
+            <MatchingCandidatesCard employees={matches} onOpenOne={setOpenCandidate} />
+          )}
+
+          <Card bordered>
+            <div className="sk-col sk-gap-4">
+              <div className="sk-col">
+                <DetailRow label="Регион" value={vacancy.city} />
+                <DetailRow label="Опыт работы" value={vacancy.experience} />
+                <DetailRow label="Тип занятости" value={vacancy.employment} />
+                <DetailRow label="Формат" value={vacancy.format} />
+                <DetailRow label="Подразделение" value={vacancy.department} />
+                <DetailRow label="Грейд" value={vacancy.grade} />
+              </div>
+
+              <Divider />
+
+              <div className="sk-col sk-gap-2">
+                <div className="sk-row sk-gap-3">
+                  <Avatar name={vacancy.recruiter.name} size={36} />
+                  <div className="sk-col" style={{ gap: 0 }}>
+                    <div className="sk-label-3">{vacancy.recruiter.name}</div>
+                    <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>{vacancy.recruiter.role}</div>
+                  </div>
+                </div>
+                <div className="sk-col sk-gap-1">
+                  <a href={"tel:" + vacancy.recruiter.phone} className="sk-row sk-gap-1" style={{ color: "var(--sk-text-accent)", font: "var(--sk-label-4-regular)", textDecoration: "none" }}>
+                    <IconPhone size={13} color="var(--sk-icon-accent)" />{vacancy.recruiter.phone}
+                  </a>
+                  <a href={"mailto:" + vacancy.recruiter.email} className="sk-row sk-gap-1" style={{ color: "var(--sk-text-accent)", font: "var(--sk-label-4-regular)", textDecoration: "none" }}>
+                    <IconMail size={13} color="var(--sk-icon-accent)" />{vacancy.recruiter.email}
+                  </a>
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </div>
+
+      {modalOpen && <ApplyModal vacancy={vacancy} initialLetter={aiDraftLetter} onClose={() => setModalOpen(false)} onSubmitted={handleSubmitted} />}
+      {recommendOpen && <RecommendModal vacancy={vacancy} onClose={() => setRecommendOpen(false)} onSubmitted={handleRecommendSubmitted} />}
+
+      {openCandidate != null && (
+        <Modal open title={`Подходящий кандидат на «${vacancy.title}»`} onClose={() => setOpenCandidate(null)} size="l"
+          primary={<Button variant="accent" onClick={() => handleCreateResponseFromCandidate(matches[openCandidate])}>Создать отклик с данными кандидата</Button>}>
+          <CandidateDetail e={matches[openCandidate]} vacancy={vacancy} />
+        </Modal>
+      )}
+
+      {toast && (
+        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", zIndex: 100 }}>
+          <Snackbar>{toast}</Snackbar>
+        </div>
+      )}
+    </AppShell>
+  );
+}
+
+function ApplyModal({ vacancy, initialLetter, onClose, onSubmitted }) {
+  const p = D.person;
+  const [lastName, setLastName] = React.useState(p.lastName);
+  const [firstName, setFirstName] = React.useState(p.firstName);
+  const [patronymic, setPatronymic] = React.useState(p.patronymic);
+  const [position, setPosition] = React.useState(p.position);
+  const [department, setDepartment] = React.useState(p.department);
+  const [tenure, setTenure] = React.useState(p.tenure);
+  const [phone, setPhone] = React.useState(p.phone);
+  const [email, setEmail] = React.useState(p.email);
+  const [city, setCity] = React.useState(p.city);
+  const [letter, setLetter] = React.useState(initialLetter || "");
+  const [resume, setResume] = React.useState(null);
+  const [usedPrompts, setUsedPrompts] = React.useState([]);
+  const remainingPrompts = D.motivationPrompts.filter((p) => !usedPrompts.includes(p));
+
+  function insertPrompt(pr) {
+    setUsedPrompts((u) => [...u, pr]);
+    setLetter((l) => (l ? l + "\n" : "") + pr);
+  }
+
+  return (
+    <Modal open title={"Отклик: " + vacancy.title} onClose={onClose} size="l"
+      secondary={<Button mode="secondary" onClick={onClose}>Отмена</Button>}
+      primary={<Button variant="accent" disabled={!resume} onClick={onSubmitted}>Отправить отклик</Button>}>
+      <div className="sk-col sk-gap-3 sk-modal-scroll">
+        <Alert hue="accent">
+          {initialLetter
+            ? "Данные и мотивационное письмо подготовлены Skillaz AI по вашему профилю — проверьте, поправьте при необходимости, прикрепите резюме и отправьте сами."
+            : "Личные данные ниже подставлены из вашего профиля — проверьте и поправьте при необходимости. Резюме нужно прикрепить отдельно."}
+        </Alert>
+
+        <div className="sk-row sk-gap-3">
+          <Input label="Фамилия" value={lastName} onChange={(e) => setLastName(e.target.value || "")} style={{ flex: 1 }} />
+          <Input label="Имя" value={firstName} onChange={(e) => setFirstName(e.target.value || "")} style={{ flex: 1 }} />
+        </div>
+        <Input label="Отчество" value={patronymic} onChange={(e) => setPatronymic(e.target.value || "")} />
+        <div className="sk-row sk-gap-3">
+          <Input label="Текущая должность" value={position} onChange={(e) => setPosition(e.target.value || "")} style={{ flex: 1 }} />
+          <Input label="Подразделение" value={department} onChange={(e) => setDepartment(e.target.value || "")} style={{ flex: 1 }} />
+        </div>
+        <div className="sk-row sk-gap-3">
+          <Input label="Стаж" value={tenure} onChange={(e) => setTenure(e.target.value || "")} style={{ flex: 1 }} />
+          <Input label="Город" value={city} onChange={(e) => setCity(e.target.value || "")} style={{ flex: 1 }} />
+        </div>
+        <div className="sk-row sk-gap-3">
+          <Input label="Телефон" value={phone} onChange={(e) => setPhone(e.target.value || "")} style={{ flex: 1 }} />
+          <Input label="Почта" value={email} onChange={(e) => setEmail(e.target.value || "")} style={{ flex: 1 }} />
+        </div>
+
+        <div className="sk-col sk-gap-2">
+          {remainingPrompts.length > 0 && (
+            <div className="sk-row sk-gap-2" style={{ flexWrap: "wrap" }}>
+              {remainingPrompts.map((pr) => (
+                <button key={pr} type="button" onClick={() => insertPrompt(pr)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 4, border: "1px solid var(--sk-stroke)",
+                    background: "var(--sk-surface-page)", borderRadius: "var(--sk-radius-full)", padding: "4px 10px 4px 8px",
+                    font: "var(--sk-label-4-regular)", color: "var(--sk-text-secondary)", cursor: "pointer",
+                  }}>
+                  <IconPlusSm size={12} />{pr}
+                </button>
+              ))}
+            </div>
+          )}
+          <div style={{ position: "relative" }}>
+            <Textarea label="Мотивационное письмо" helper="Необязательно, но повышает шансы"
+              placeholder="Расскажите, почему вам интересна эта роль…" value={letter}
+              onChange={(e) => setLetter((e.target.value || "").slice(0, 800))} rows={3} />
+            <span style={{
+              position: "absolute", right: 12, bottom: 36, pointerEvents: "none",
+              font: "var(--sk-label-4-regular)", color: "var(--sk-text-tertiary)",
+            }}>{letter.length}/800</span>
+          </div>
+        </div>
+
+        <div className="sk-col sk-gap-2">
+          <div className="sk-row sk-gap-1"><div className="sk-label-3">Резюме</div><span style={{ color: "var(--sk-text-negative)" }}>*</span></div>
+          {resume ? (
+            <div className="sk-row sk-gap-2" style={{ padding: "10px 12px", border: "1px solid var(--sk-stroke)", borderRadius: "var(--sk-radius-2)" }}>
+              <IconFileText size={16} color="var(--sk-icon-secondary)" />
+              <span className="sk-label-3-regular" style={{ flex: 1 }}>{resume}</span>
+              <button className="sk-link-btn sk-label-4-regular" onClick={() => setResume(null)}>Удалить</button>
+            </div>
+          ) : (
+            <div className="sk-clickable" onClick={() => setResume("Резюме_Мезенцева_Юлия.pdf")} style={{
+              border: "1.5px dashed var(--sk-stroke)", borderRadius: "var(--sk-radius-3)", padding: "22px 16px",
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 6, textAlign: "center",
+              background: "var(--sk-surface-secondary)",
+            }}>
+              <IconUpload size={20} color="var(--sk-icon-secondary)" />
+              <div className="sk-label-3-regular">Перетащите файл сюда или <span style={{ color: "var(--sk-text-accent)" }}>выберите на компьютере</span></div>
+              <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>PDF, DOC или DOCX, до 10 МБ</div>
+            </div>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function RecommendModal({ vacancy, onClose, onSubmitted }) {
+  const p = D.person;
+  const [city, setCity] = React.useState("");
+  const [phone, setPhone] = React.useState("");
+  const [relation, setRelation] = React.useState(null);
+  const [reason, setReason] = React.useState("");
+  const [resume, setResume] = React.useState(null);
+  const canSubmit = city.trim() && phone.trim() && relation && reason.trim();
+
+  return (
+    <Modal open title={"Рекомендация: " + vacancy.title} onClose={onClose} size="m"
+      secondary={<Button mode="secondary" onClick={onClose}>Отмена</Button>}
+      primary={<Button variant="accent" disabled={!canSubmit} onClick={onSubmitted}>Отправить рекомендацию</Button>}>
+      <div className="sk-col sk-gap-3 sk-modal-scroll">
+        <Alert hue="accent">Рекомендация уйдёт рекрутёру вакансии. Ваше имя и почта прикрепятся к ней автоматически.</Alert>
+
+        <Input label="Город, в котором проживает кандидат" required value={city} onChange={(e) => setCity(e.target.value || "")} />
+        <Input label="Мобильный телефон кандидата" required placeholder="+7 900 000 00 00" value={phone} onChange={(e) => setPhone(e.target.value || "")} />
+        <Select label="Кем вам приходится кандидат?" required options={RELATION_OPTIONS} value={relation} onChange={setRelation} placeholder="Выберите вариант" />
+        <Textarea label="Причина рекомендации" required placeholder="Почему вы считаете кандидата подходящим?"
+          value={reason} onChange={(e) => setReason((e.target.value || "").slice(0, 500))} rows={3} />
+
+        <div className="sk-col sk-gap-2">
+          <div className="sk-row sk-gap-1"><div className="sk-label-3">Резюме кандидата</div>
+            <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>(необязательно)</span></div>
+          {resume ? (
+            <div className="sk-row sk-gap-2" style={{ padding: "10px 12px", border: "1px solid var(--sk-stroke)", borderRadius: "var(--sk-radius-2)" }}>
+              <IconFileText size={16} color="var(--sk-icon-secondary)" />
+              <span className="sk-label-3-regular" style={{ flex: 1 }}>{resume}</span>
+              <button className="sk-link-btn sk-label-4-regular" onClick={() => setResume(null)}>Удалить</button>
+            </div>
+          ) : (
+            <div className="sk-clickable" onClick={() => setResume("Резюме_кандидата.pdf")} style={{
+              border: "1.5px dashed var(--sk-stroke)", borderRadius: "var(--sk-radius-3)", padding: "22px 16px",
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 6, textAlign: "center",
+              background: "var(--sk-surface-secondary)",
+            }}>
+              <IconUpload size={20} color="var(--sk-icon-secondary)" />
+              <div className="sk-label-3-regular">Перетащите файл сюда или <span style={{ color: "var(--sk-text-accent)" }}>выберите на компьютере</span></div>
+              <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>PDF, DOC или DOCX, до 10 МБ</div>
+            </div>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<Page />);
+</script>
+</body>
+</html>

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Моя адаптация — Skillaz Start</title>
+<link rel="stylesheet" href="../assets/styles.css" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<script src="../assets/ds_bundle.js"></script>
+<script src="../assets/data.js"></script>
+<script src="../assets/cover-art.js"></script>
+<script type="text/babel" src="../assets/shell.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { Card, ProgressCircle, Tag } = window.SkillazCoreDesignSystem_bf9566;
+const { AppShell, StatusTag, PlanCover, PLAN_COVER_HUE } = window.Site;
+const D = window.SITE_DATA;
+
+function progressOf(plan) {
+  if (!plan.hasGoals) {
+    const all = plan.stages.flatMap(s => s.items.filter(i => i.kind !== "checkpoint"));
+    const done = all.filter(i => i.done).length;
+    return all.length ? Math.round((done / all.length) * 100) : 0;
+  }
+  // Прогресс по целям — по промежуточным результатам (см. manager/team.html).
+  const done = plan.goals.reduce((n, g) => n + g.subgoals.filter(s => s.status === "done").length, 0);
+  const total = plan.goals.reduce((n, g) => n + g.subgoals.length, 0);
+  return total ? Math.round((done / total) * 100) : 0;
+}
+
+function PlanCard({ plan, clickable = true }) {
+  const pending = plan.status === "awaiting_start";
+  const pct = plan.status === "completed" ? 100 : (plan.stages ? progressOf(plan) : 0);
+  const statusKey = plan.status === "completed" ? "completed" : pending ? "awaiting_start" : "in_progress_plan";
+  // План ещё не сформирован — приглушаем содержимое, но не статус-тег: он как раз
+  // объясняет, почему карточка выглядит неактивной.
+  const fade = pending ? { opacity: 0.55 } : undefined;
+  const body = (
+    <Card bordered padding={0} style={{ cursor: clickable ? "pointer" : "default", overflow: "hidden" }}>
+      <div className="sk-row" style={{ alignItems: "stretch", gap: 0 }}>
+      <PlanCover hue={PLAN_COVER_HUE[statusKey]} />
+      <div className="sk-row sk-gap-4" style={{ justifyContent: "space-between", padding: 24, flex: 1, minWidth: 0 }}>
+        <div className="sk-col sk-gap-2" style={{ flex: 1, minWidth: 0 }}>
+          <div className="sk-row sk-gap-2">
+            <Tag size="s" hue="neutral">{plan.type}</Tag>
+            <StatusTag status={statusKey} />
+          </div>
+          <div className="sk-title-5" style={fade}>{plan.title}</div>
+          <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)", ...fade }}>
+            {plan.dateEnd ? `${plan.dateStart} – ${plan.dateEnd}` : `с ${plan.dateStart}`}
+          </div>
+        </div>
+        {pending ? (
+          <div style={{ textAlign: "center", flexShrink: 0, ...fade }}>
+            <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>старт</div>
+            <div className="sk-title-5">{plan.dateStart.slice(0, 5)}</div>
+          </div>
+        ) : (
+          <ProgressCircle value={pct} size={72} thickness={5} hue={plan.status === "completed" ? "positive" : "accent"} />
+        )}
+      </div>
+      </div>
+    </Card>
+  );
+  return clickable
+    ? <a href={"plan.html?plan=" + plan.id} style={{ textDecoration: "none" }}>{body}</a>
+    : body;
+}
+
+function RoleGroup({ title, period, children }) {
+  return (
+    <div className="sk-col sk-gap-2">
+      <div className="sk-row sk-gap-2" style={{ alignItems: "baseline", paddingLeft: 2 }}>
+        <span className="sk-label-3">{title}</span>
+        {period && <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>· {period}</span>}
+      </div>
+      <div className="sk-col sk-gap-4" style={{ maxWidth: 880 }}>{children}</div>
+    </div>
+  );
+}
+
+function Page() {
+  const currentRolePlans = [D.plans.onboarding, D.plans.preboarding]
+    .sort((a, b) => (a.status === "completed") - (b.status === "completed"));
+  const newRolePlan = D.plans.roleTransition;
+  return (
+    <AppShell role="employee" active="my-adaptation" base="..">
+      <div className="sk-col sk-gap-2">
+        <div className="sk-title-4">Моя адаптация</div>
+      </div>
+
+      {newRolePlan && (
+        <RoleGroup title={newRolePlan.role}>
+          <PlanCard plan={newRolePlan} clickable={false} />
+        </RoleGroup>
+      )}
+
+      <RoleGroup title={D.person.position}>
+        {currentRolePlans.map(p => <PlanCard key={p.id} plan={p} />)}
+      </RoleGroup>
+    </AppShell>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Page />);
+</script>
+</body>
+</html>

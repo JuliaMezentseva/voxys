@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Отклики — Skillaz Start</title>
+<link rel="stylesheet" href="../assets/styles.css" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<script src="../assets/ds_bundle.js"></script>
+<script src="../assets/data.js"></script>
+<script type="text/babel" src="../assets/shell.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { Card, Avatar, Button, Input, Select, Tag, Divider } = window.SkillazCoreDesignSystem_bf9566;
+const { AppShell, Icons, ClearableSelect } = window.Site;
+const { IconArrowLeft, IconMapPin, IconBriefcase, IconPhone, IconMail, IconSearch, IconFileText } = Icons;
+const D = window.SITE_DATA;
+
+function vacancyIdFromUrl() {
+  const id = new URLSearchParams(window.location.search).get("id");
+  return D.vacancies.find((v) => v.id === id) ? id : D.vacancies[0].id;
+}
+
+// Резюме в этом контуре не хранится как настоящий файл — при скачивании собираем текстовый
+// файл из тех же данных, что уже показаны в карточке отклика (см. exportResponsesCsv в
+// hr/vacancies-manage.html — тот же паттерн генерации файла из мок-данных на клиенте).
+function downloadResume(r) {
+  const lines = [
+    r.lastName + " " + r.firstName + " " + r.patronymic,
+    r.position + (r.department ? " — " + r.department : ""),
+    "Стаж в компании: " + r.tenure,
+    "Город: " + r.city,
+    "Телефон: " + r.phone,
+    "Email: " + r.email,
+    "",
+    "Сопроводительное письмо:",
+    r.letter || "—",
+  ];
+  const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "Резюме_" + r.lastName + "_" + r.firstName + ".txt";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Стаж — свободный текст ("2 года 3 месяца"), для сортировки и фильтра по стажу
+// разбираем его в сравнимое число месяцев.
+function parseTenureMonths(t) {
+  const nums = ((t || "").match(/\d+/g) || []).map(Number);
+  return (nums[0] || 0) * 12 + (nums[1] || 0);
+}
+function tenureBucket(t) {
+  const m = parseTenureMonths(t);
+  if (m < 12) return "lt1";
+  if (m < 36) return "1to3";
+  return "gt3";
+}
+const TENURE_BUCKET_LABELS = { lt1: "До 1 года", "1to3": "От 1 до 3 лет", gt3: "Более 3 лет" };
+
+function parseDate(d) {
+  const [dd, mm, yy] = (d || "").split(".").map(Number);
+  return new Date(2000 + (yy || 0), (mm || 1) - 1, dd || 1).getTime();
+}
+
+const SORT_OPTIONS = [
+  { value: "date:desc", label: "Дата отклика: сначала новые" },
+  { value: "date:asc", label: "Дата отклика: сначала старые" },
+  { value: "", label: "Без сортировки" },
+  { value: "name:asc", label: "Имя: А→Я" },
+  { value: "tenure:desc", label: "Стаж: сначала больше" },
+  { value: "tenure:asc", label: "Стаж: сначала меньше" },
+  { value: "city:asc", label: "Город: А→Я" },
+];
+
+// Карточка отклика — основной и единственный вид списка (без клика — вся нужная
+// информация, включая резюме, видна сразу на самой карточке, открывать больше нечего).
+// Раньше здесь была таблица, но сопроводительное письмо в узкой колонке с обрезкой
+// в 1–2 строки мелким серым текстом читалось плохо — а именно ради него админ и
+// открывает отклик, поэтому под письмо отдельный блок нормальным текстом.
+// Письмо клэмпим на 4 строки по умолчанию и раскрываем по клику — так карточка не
+// разъезжается на весь экран сразу, но длинное письмо (по факту они будут длиннее,
+// чем в моке) всё равно можно дочитать целиком в один клик, без модалки.
+function LetterBlock({ letter }) {
+  const [expanded, setExpanded] = React.useState(false);
+  const text = letter || "Кандидат не оставил сопроводительное письмо.";
+  const isLong = text.length > 220;
+  return (
+    <div className="sk-col sk-gap-1">
+      <div className="sk-label-3-regular" style={{
+        color: "var(--sk-text-primary)", whiteSpace: "pre-wrap",
+        ...(isLong && !expanded ? { display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical", overflow: "hidden" } : {}),
+      }}>
+        {text}
+      </div>
+      {isLong && (
+        <button type="button" onClick={() => setExpanded((e) => !e)} className="sk-link-btn"
+          style={{ alignSelf: "flex-start", color: "var(--sk-text-accent)", font: "var(--sk-label-4)" }}>
+          {expanded ? "Свернуть" : "Читать полностью"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Тот же вид, что и ResumeCard в employee/my-responses.html — простая белая плашка с
+// рамкой, без серой подложки и без отдельной кнопки, кликабельна целиком.
+function ResumeCard({ r }) {
+  const name = "Резюме_" + r.lastName + "_" + r.firstName + ".pdf";
+  return (
+    <div className="sk-row sk-gap-3 sk-clickable" onClick={() => downloadResume(r)} style={{
+      alignItems: "center", padding: "12px 14px", borderRadius: "var(--sk-radius-3)",
+      border: "1px solid var(--sk-stroke)", background: "var(--sk-surface-page)", maxWidth: 320,
+    }}>
+      <div style={{
+        width: 36, height: 36, borderRadius: "var(--sk-radius-2)", flexShrink: 0,
+        display: "flex", alignItems: "center", justifyContent: "center", background: "var(--sk-accent-secondary)",
+      }}><IconFileText size={18} color="var(--sk-icon-accent)" /></div>
+      <div className="sk-label-4" style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+    </div>
+  );
+}
+
+// Карточка отклика — контакты живут в том же левом блоке, что и остальная инфа о
+// кандидате (рядом с должностью/стажем/городом), а не оторваны в отдельную колонку
+// справа — так они читаются как часть одного профиля. Дата отклика, наоборот, не
+// относится к кандидату, а описывает событие — поэтому она одна остаётся в правом
+// углу шапки, на одной строке с именем.
+function ResponseCard({ r }) {
+  const fio = r.lastName + " " + r.firstName + " " + r.patronymic;
+  return (
+    <Card bordered style={{ boxShadow: "inset 0 0 0 1px var(--sk-stroke)" }}>
+      <div className="sk-col sk-gap-3">
+        <div className="sk-row sk-gap-3" style={{ alignItems: "flex-start" }}>
+          <Avatar name={fio} size={40} />
+          <div className="sk-col" style={{ gap: 2, minWidth: 0, flex: 1 }}>
+            <div className="sk-row sk-gap-2" style={{ alignItems: "baseline", flexWrap: "wrap", justifyContent: "space-between" }}>
+              <div className="sk-label-3">{fio}</div>
+              {r.date && <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)", flexShrink: 0 }}>Откликнулся {r.date}</div>}
+            </div>
+            <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>{r.position} · {r.department}</div>
+            <div className="sk-row sk-gap-3 sk-muted" style={{ font: "var(--sk-label-4-regular)", marginTop: 2 }}>
+              <span className="sk-row sk-gap-1"><IconBriefcase size={13} />Стаж {r.tenure}</span>
+              <span className="sk-row sk-gap-1"><IconMapPin size={13} />{r.city}</span>
+            </div>
+            <div className="sk-col sk-gap-1" style={{ marginTop: 2 }}>
+              <a href={"tel:" + r.phone} className="sk-row sk-gap-1" style={{ color: "var(--sk-text-accent)", font: "var(--sk-label-4-regular)", textDecoration: "none" }}>
+                <IconPhone size={13} color="var(--sk-icon-accent)" />{r.phone}
+              </a>
+              <a href={"mailto:" + r.email} className="sk-row sk-gap-1" style={{ color: "var(--sk-text-accent)", font: "var(--sk-label-4-regular)", textDecoration: "none" }}>
+                <IconMail size={13} color="var(--sk-icon-accent)" />{r.email}
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <Divider />
+
+        <LetterBlock letter={r.letter} />
+        <ResumeCard r={r} />
+      </div>
+    </Card>
+  );
+}
+
+function Page() {
+  const vacancy = D.vacancies.find((v) => v.id === vacancyIdFromUrl());
+  const responses = vacancy.responses || [];
+  const [q, setQ] = React.useState("");
+  const [filtersOpen, setFiltersOpen] = React.useState(false);
+  const [filters, setFilters] = React.useState({ city: "", department: "", tenure: "" });
+  const [sort, setSort] = React.useState("date:desc");
+
+  const cityOptions = React.useMemo(() => [...new Set(responses.map((r) => r.city))].sort(), [responses]);
+  const departmentOptions = React.useMemo(() => [...new Set(responses.map((r) => r.department))].sort(), [responses]);
+  const hasActiveFilters = !!(filters.city || filters.department || filters.tenure);
+  const activeFilterCount = [filters.city, filters.department, filters.tenure].filter(Boolean).length;
+
+  const needle = q.trim().toLowerCase();
+  const filtered = React.useMemo(() => {
+    let list = responses;
+    if (needle) {
+      list = list.filter((r) =>
+        (r.lastName + " " + r.firstName).toLowerCase().includes(needle) || r.position.toLowerCase().includes(needle));
+    }
+    if (filters.city) list = list.filter((r) => r.city === filters.city);
+    if (filters.department) list = list.filter((r) => r.department === filters.department);
+    if (filters.tenure) list = list.filter((r) => tenureBucket(r.tenure) === filters.tenure);
+    if (sort) {
+      const [key, dir] = sort.split(":");
+      const m = dir === "asc" ? 1 : -1;
+      list = [...list].sort((a, b) => {
+        let av, bv;
+        if (key === "name") { av = a.lastName + a.firstName; bv = b.lastName + b.firstName; }
+        else if (key === "tenure") { av = parseTenureMonths(a.tenure); bv = parseTenureMonths(b.tenure); }
+        else if (key === "city") { av = a.city; bv = b.city; }
+        else if (key === "date") { av = parseDate(a.date); bv = parseDate(b.date); }
+        if (typeof av === "number" && typeof bv === "number") return (av - bv) * m;
+        return String(av).localeCompare(String(bv), "ru") * m;
+      });
+    }
+    return list;
+  }, [responses, needle, filters, sort]);
+
+  return (
+    <AppShell role="hr" active="vacancies" base=".."
+      breadcrumb={<a href={"vacancy.html?id=" + vacancy.id} className="sk-row sk-gap-1" style={{ color: "var(--sk-text-secondary)" }}><IconArrowLeft size={14} /> Вакансия</a>}>
+      <div className="sk-col sk-gap-1">
+        <div className="sk-title-4">Отклики</div>
+        <div className="sk-row sk-gap-2 sk-muted" style={{ alignItems: "center", flexWrap: "wrap" }}>
+          <a href={"vacancy.html?id=" + vacancy.id} className="sk-label-3" style={{ color: "var(--sk-text-primary)" }}>{vacancy.title}</a>
+          <Tag size="s" hue={vacancy.status === "open" ? "positive" : "neutral"}>{vacancy.status === "open" ? "Идёт поиск" : "Закрыта"}</Tag>
+          <span>·</span>
+          <span className="sk-row sk-gap-1"><IconMapPin size={13} />{vacancy.city}</span>
+          <span className="sk-row sk-gap-1"><IconBriefcase size={13} />{vacancy.department}</span>
+        </div>
+      </div>
+
+      <div className="sk-row sk-gap-2" style={{ alignItems: "center", flexWrap: "wrap" }}>
+        <Input size="s" icon={<IconSearch size={20} />} placeholder="Поиск по имени или должности"
+          value={q} onChange={(e) => setQ(e.target.value || "")} style={{ maxWidth: 360, flex: 1 }} />
+        <Button mode="secondary" icon={<Icons.IconFilter size={16} />} onClick={() => setFiltersOpen((o) => !o)}
+          style={{ background: "var(--sk-surface-page)", border: "1px solid var(--sk-stroke)" }}>
+          Фильтры{hasActiveFilters ? " · " + activeFilterCount : ""}
+        </Button>
+        <Select value={sort} placeholder="Без сортировки" options={SORT_OPTIONS} onChange={setSort} style={{ minWidth: 220 }} />
+      </div>
+
+      {filtersOpen && (
+        <Card bordered>
+          <div className="sk-row sk-gap-3" style={{ flexWrap: "wrap", alignItems: "flex-end" }}>
+            <ClearableSelect label="Город" value={filters.city} placeholder="Любой город"
+              options={cityOptions.map((c) => ({ value: c, label: c }))}
+              onChange={(v) => setFilters((f) => ({ ...f, city: v }))} onClear={() => setFilters((f) => ({ ...f, city: "" }))} style={{ minWidth: 180 }} />
+            <ClearableSelect label="Подразделение" value={filters.department} placeholder="Любое подразделение"
+              options={departmentOptions.map((d) => ({ value: d, label: d }))}
+              onChange={(v) => setFilters((f) => ({ ...f, department: v }))} onClear={() => setFilters((f) => ({ ...f, department: "" }))} style={{ minWidth: 220 }} />
+            <ClearableSelect label="Стаж в компании" value={filters.tenure} placeholder="Любой стаж"
+              options={Object.entries(TENURE_BUCKET_LABELS).map(([value, label]) => ({ value, label }))}
+              onChange={(v) => setFilters((f) => ({ ...f, tenure: v }))} onClear={() => setFilters((f) => ({ ...f, tenure: "" }))} style={{ minWidth: 180 }} />
+            {hasActiveFilters && (
+              <Button mode="tertiary" onClick={() => setFilters({ city: "", department: "", tenure: "" })}>Сбросить</Button>
+            )}
+          </div>
+        </Card>
+      )}
+
+      <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>Найдено откликов: {filtered.length}</div>
+
+      {filtered.length === 0 ? (
+        <Card><div className="sk-muted" style={{ textAlign: "center", padding: "24px 0" }}>
+          {responses.length === 0 ? "Пока нет откликов на эту вакансию." : "Ничего не нашлось по заданным условиям."}
+        </div></Card>
+      ) : (
+        <div className="sk-col sk-gap-3">
+          {filtered.map((r, i) => (
+            <ResponseCard key={i} r={r} />
+          ))}
+        </div>
+      )}
+    </AppShell>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Page />);
+</script>
+</body>
+</html>

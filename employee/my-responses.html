@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Мои отклики — Skillaz Start</title>
+<link rel="stylesheet" href="../assets/styles.css" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<script src="../assets/ds_bundle.js"></script>
+<script src="../assets/data.js"></script>
+<script type="text/babel" src="../assets/shell.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { Card, Tag, Tabs, Divider } = window.SkillazCoreDesignSystem_bf9566;
+const { AppShell, Icons } = window.Site;
+const { IconFileText } = Icons;
+const D = window.SITE_DATA;
+
+function fmtMoney(n) { return n.toLocaleString("ru-RU"); }
+
+const RU_MONTHS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+function fmtRuDate(d) {
+  const [day, month, year] = d.split(".");
+  return `${parseInt(day, 10)} ${RU_MONTHS[parseInt(month, 10) - 1]} 20${year}`;
+}
+
+// Тот же переключатель "Витрина / Мои отклики", что и на employee/vacancies.html —
+// переход между двумя HTML-страницами, поэтому onChange меняет location, а не состояние.
+function EmployeeVacanciesTabs({ active, responsesCount, referralsCount }) {
+  function go(id) {
+    if (id === active) return;
+    window.location.href = id === "showcase" ? "vacancies.html" : id === "my-responses" ? "my-responses.html" : "my-referrals.html";
+  }
+  return (
+    <Tabs active={active} onChange={go} items={[
+      { id: "showcase", label: "Вакансии" },
+      { id: "my-responses", label: "Мои отклики", count: responsesCount || undefined },
+      { id: "my-referrals", label: "Я рекомендую", count: referralsCount || undefined },
+    ]} />
+  );
+}
+
+// Резюме в контуре не хранится как настоящий файл — при скачивании собираем текстовый
+// слепок из тех же данных, что уже показаны (тот же приём, что в hr/vacancy-responses.html).
+function downloadResumeStub(name, letter) {
+  const lines = [D.person.name, D.person.position + " — " + D.person.department, "", "Файл: " + name, "", letter ? "Сопроводительное письмо:" : "", letter || ""];
+  const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name.replace(/\.pdf$/i, "") + ".txt";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Карточка прикреплённого резюме — по референсу (см. мои-отклики.svg): простая белая
+// плашка с рамкой, без отдельной кнопки — кликабельна целиком.
+function ResumeCard({ name, size, letter }) {
+  return (
+    <div className="sk-row sk-gap-3 sk-clickable" onClick={(e) => { e.preventDefault(); e.stopPropagation(); downloadResumeStub(name, letter); }} style={{
+      alignItems: "center", padding: "12px 14px", borderRadius: "var(--sk-radius-3)",
+      border: "1px solid var(--sk-stroke)", background: "var(--sk-surface-page)", maxWidth: 320,
+    }}>
+      <div style={{
+        width: 36, height: 36, borderRadius: "var(--sk-radius-2)", flexShrink: 0,
+        display: "flex", alignItems: "center", justifyContent: "center", background: "var(--sk-accent-secondary)",
+      }}><IconFileText size={18} color="var(--sk-icon-accent)" /></div>
+      <div className="sk-col" style={{ flex: 1, gap: 0, minWidth: 0 }}>
+        <div className="sk-label-4" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+        {size && <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>{size}</div>}
+      </div>
+    </div>
+  );
+}
+
+// Сопроводительное письмо — по референсу показывается целиком, без подложки и без
+// заголовка-лейбла: обычный текст абзацами (в данных уже разделены пустой строкой).
+function LetterBlock({ letter }) {
+  if (!letter) return null;
+  return (
+    <div className="sk-label-3-regular" style={{ color: "var(--sk-text-primary)", whiteSpace: "pre-wrap" }}>{letter}</div>
+  );
+}
+
+// Статус самого отклика в ATS не синхронизируется — единственное, что система знает
+// достоверно, это факт и дата отправки. Вместо выдуманного статуса — тег "Отклик отправлен",
+// а для закрытых вакансий вместо него тег о закрытии (это уже есть локально и реально
+// полезно: стоит ли ещё ждать ответа). Письмо и резюме показываем как есть — это то,
+// что сотрудник сам отправил рекрутёру, и после отправки уже не редактируется.
+function ResponseRow({ r }) {
+  const v = D.vacancies.find(x => x.id === r.vacancyId);
+  if (!v) return null;
+  const closed = v.status === "closed";
+  const [hovered, setHovered] = React.useState(false);
+  return (
+    <a href={"vacancy.html?id=" + v.id} style={{ textDecoration: "none" }}
+      onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+      <Card bordered style={{ cursor: "pointer", boxShadow: hovered ? "inset 0 0 0 1.5px var(--sk-stroke-accent)" : "inset 0 0 0 1px var(--sk-stroke)" }}>
+        <div className="sk-col sk-gap-3" style={{ opacity: closed ? 0.7 : 1 }}>
+          <div className="sk-row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div className="sk-col sk-gap-1">
+              <div className="sk-label-2">{v.title}</div>
+              <div className="sk-label-3-regular">
+                {v.salaryFrom && v.salaryTo ? `${fmtMoney(v.salaryFrom)} – ${fmtMoney(v.salaryTo)} ₽` : "По договорённости"}
+              </div>
+              <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>{v.city} · {v.department}</div>
+            </div>
+            <Tag size="s" hue={closed ? "neutral" : "positive"}>{closed ? "Вакансия закрыта" : "Отклик отправлен"}</Tag>
+          </div>
+
+          <Divider />
+
+          <div className="sk-col sk-gap-3">
+            <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>Отправлено {fmtRuDate(r.date)}</div>
+            <LetterBlock letter={r.letter} />
+            {r.resumeFile && <ResumeCard name={r.resumeFile} size={r.resumeSize} letter={r.letter} />}
+          </div>
+        </div>
+      </Card>
+    </a>
+  );
+}
+
+function Page() {
+  const responses = D.myResponses;
+  return (
+    <AppShell role="employee" active="vacancies" base="..">
+      <div className="sk-title-3">Откройте новые карьерные возможности</div>
+      <EmployeeVacanciesTabs active="my-responses" responsesCount={responses.length} referralsCount={D.myReferrals.length} />
+
+      <div className="sk-col sk-gap-2">
+        <div className="sk-muted">Вакансии, на которые вы откликнулись. Информацию о движении откликов вы будете получать в уведомлениях.</div>
+      </div>
+      <div className="sk-col sk-gap-3">
+        {responses.length === 0 && (
+          <Card><div className="sk-muted" style={{ textAlign: "center", padding: "16px 0" }}>Вы пока не откликались ни на одну вакансию.</div></Card>
+        )}
+        {responses.map((r, i) => <ResponseRow key={i} r={r} />)}
+      </div>
+    </AppShell>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Page />);
+</script>
+</body>
+</html>

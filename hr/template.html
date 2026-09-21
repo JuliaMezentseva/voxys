@@ -1,0 +1,1691 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Шаблон плана — Редактор адаптации — Skillaz Start</title>
+<link rel="stylesheet" href="../assets/styles.css" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<script src="../assets/ds_bundle.js"></script>
+<script src="../assets/data.js"></script>
+<script type="text/babel" src="../assets/shell.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { Card, Switch, Input, Textarea, Select, Checkbox, SegmentedControl, Tabs, Tooltip, Divider, Button, IconButton, Modal, Drawer, Alert, Tag, Avatar, Snackbar } = window.SkillazCoreDesignSystem_bf9566;
+const { AppShell, Icons, personPhoto } = window.Site;
+const {
+  IconInfo, IconTarget, IconCheck, IconClipboard, IconSettings,
+  IconHelpCircle, IconTrash, IconArrowLeft, IconClock, IconFileText, IconLink2, IconGraduationCap, IconMessageCircle,
+  IconPlusSm, IconEdit, IconLayers, IconBookOpen, IconCalendar, IconSearch, IconX,
+  IconFilter, IconChevronDown, IconChevronRight, IconUsers, IconFlag, IconAlertCircle, IconMapPin,
+} = Icons;
+
+// Склонение "шаг/шага/шагов" — для строки карточки цели в каталоге (см. GoalCatalogPickerModal).
+function pluralSteps(n) {
+  const mod10 = n % 10, mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "результат";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "результата";
+  return "результатов";
+}
+
+// В наборе иконок ДС нет "ручки" для перетаскивания — добавляем локально, по тому же
+// принципу, что и одноразовые иконки в других файлах (hr/templates.html: IconCopyLocal).
+function IconGripVertical({ size = 16, color = "currentColor" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ color, flexShrink: 0 }}>
+      <circle cx="9" cy="6" r="1.4" fill="currentColor" />
+      <circle cx="9" cy="12" r="1.4" fill="currentColor" />
+      <circle cx="9" cy="18" r="1.4" fill="currentColor" />
+      <circle cx="15" cy="6" r="1.4" fill="currentColor" />
+      <circle cx="15" cy="12" r="1.4" fill="currentColor" />
+      <circle cx="15" cy="18" r="1.4" fill="currentColor" />
+    </svg>
+  );
+}
+
+// Иконка цели — мишень со стрелой (target-arrow), тот же вид, что и в hr/goals-catalog.html
+// (IconGoalRing), для единого визуального языка "цель/шаг" во всём прототипе.
+function IconGoalRing({ size = 16, color = "currentColor" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 22 22" fill="none" style={{ color, flexShrink: 0 }}>
+      <path d="M15 7V4L18 1L19 3L21 4L18 7H15ZM15 7L11 10.9999M21 11C21 16.5228 16.5228 21 11 21C5.47715 21 1 16.5228 1 11C1 5.47715 5.47715 1 11 1M16 11C16 13.7614 13.7614 16 11 16C8.23858 16 6 13.7614 6 11C6 8.23858 8.23858 6 11 6"
+        stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+const TEMPLATE_SECTIONS = [
+  { id: "description", label: "Описание", icon: IconInfo },
+  { id: "goals", label: "Цели адаптации", icon: IconTarget },
+  { id: "checklist", label: "Маршрут", icon: IconCheck },
+  { id: "tasks", label: "Задачи", icon: IconClipboard },
+  { id: "faq", label: "FAQ", icon: IconMessageCircle },
+  { id: "settings", label: "Настройки", icon: IconSettings },
+];
+
+// Кликабельны только разделы, отрисованные в этой итерации — остальные пункты навигации
+// показывают заглушку NotBuiltSection (см. Флоу_HRАдмина_настройка_шаблона).
+const BUILT_SECTIONS = ["description", "goals", "checklist", "tasks"];
+
+const TEMPLATE_STATUS = {
+  active: { label: "Активный", hue: "positive" },
+  draft: { label: "Черновик", hue: "neutral" },
+  archived: { label: "Архивный", hue: "gray" },
+};
+
+// Срок цели/шага в шаблоне задаётся днём от начала плана (30-й день, 60-й день), а не
+// календарной датой — у шаблона нет реальной даты старта, она появится только при
+// назначении плана сотруднику (тот же принцип, что и у контрольных точек).
+function dueDayLabel(days) {
+  return (Number(days) || 0) + "-й день";
+}
+
+function SectionNavItem({ item, active, disabled, onClick }) {
+  const [hover, setHover] = React.useState(false);
+  const Icon = item.icon;
+  return (
+    <div onClick={disabled ? undefined : onClick}
+      onMouseEnter={() => !disabled && setHover(true)} onMouseLeave={() => setHover(false)}
+      className={disabled ? "" : "sk-clickable"} style={{
+      display: "flex", alignItems: "flex-start", gap: 10, minHeight: 40, padding: "9px 12px", borderRadius: "var(--sk-radius-3)",
+      background: active || hover ? "var(--sk-hover-nav)" : "transparent",
+      color: disabled ? "var(--sk-text-tertiary)" : "var(--sk-text-primary)", font: active ? "var(--sk-label-3)" : "var(--sk-label-3-regular)",
+      cursor: disabled ? "default" : "pointer",
+    }}>
+      <Icon size={18} color={disabled ? "var(--sk-icon-tertiary)" : "var(--sk-icon-secondary)"} style={{ flexShrink: 0, marginTop: 1 }} />
+      <span style={{ flex: 1, lineHeight: 1.35 }}>{item.label}</span>
+    </div>
+  );
+}
+
+// ---------------- Левая колонка: разделы плана + действия с шаблоном. Блоки "Информация"
+// и "Статистика" убраны из UI по просьбе Юли — были избыточны, отвлекали от настроек. ----------------
+function PlanSectionsNav({ section, onChange, template, onDeleteTemplate }) {
+  return (
+    <div style={{ width: 260, flexShrink: 0 }}>
+      <Card bordered>
+        <div className="sk-col sk-gap-4">
+          <div className="sk-col sk-gap-1">
+            <div className="sk-label-4" style={{ color: "var(--sk-text-tertiary)", textTransform: "uppercase", padding: "0 12px 4px" }}>Разделы плана</div>
+            {TEMPLATE_SECTIONS.map((s) => {
+              const disabled = !BUILT_SECTIONS.includes(s.id);
+              return (
+                <SectionNavItem key={s.id} item={s} active={section === s.id} disabled={disabled}
+                  onClick={() => onChange(s.id)} />
+              );
+            })}
+          </div>
+
+          <Divider />
+
+          <div className="sk-row sk-gap-3">
+            <IconButton variant="negative" mode="secondary"
+              style={{ boxShadow: "inset 0 0 0 1px var(--sk-stroke-negative)" }} onClick={onDeleteTemplate}><IconTrash size={16} /></IconButton>
+            <Button mode="secondary" style={{ flex: 1 }} onClick={() => { window.location.href = "templates.html"; }}>Вернуться</Button>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// Разделы, которые по ТЗ существуют в шаблоне, но не входят в эту итерацию прототипа —
+// в фокусе сейчас только настройка блока целей (см. Флоу_HRАдмина_настройка_шаблона).
+function NotBuiltSection({ label }) {
+  return (
+    <Card bordered>
+      <div className="sk-col sk-gap-2" style={{ alignItems: "center", textAlign: "center", padding: "32px 16px" }}>
+        <div style={{ width: 40, height: 40, borderRadius: "50%", background: "var(--sk-surface-secondary)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <IconClipboard size={18} color="var(--sk-icon-secondary)" />
+        </div>
+        <div className="sk-label-2">Раздел «{label}»</div>
+        <div className="sk-muted" style={{ maxWidth: 360 }}>
+          Не входит в текущую итерацию прототипа — сейчас в фокусе только настройка блока целей адаптации.
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+// Контрольные точки шаблона — нумерованные кружки (стиль из RightPanel employee/plan.html),
+// но, в отличие от превью прошлой итерации, полноценно редактируемые: HR может добавить,
+// изменить или удалить КТ прямо в шаблоне. Для новых шаблонов список стартует пустым —
+// симметрично блоку "Цели", без заранее предсозданных точек.
+// Шкала оценки для вопросов КТ — одна на все вопросы контрольной точки (не настраивается
+// по-вопросно): "1 - 5 (эмодзи)" по умолчанию, плюс примеры альтернативных шкал. Это
+// только подпись в селекте для Админа — реальный опрос сотрудника (employee/plan.html,
+// CheckpointModal) рисует шкалу 1-5 своими SVG-"лицами" (ScaleFace), а не эмодзи-символами
+// (эмодзи по ДС не используем — их рендер зависит от ОС), поэтому конкретный вид шкалы тут
+// не превьюим.
+const CHECKPOINT_SCALE_OPTIONS = [
+  { id: "emoji5", label: "1 - 5 (эмодзи)" },
+  { id: "num5", label: "1–5 (числа)" },
+  { id: "num10", label: "1–10 (числа)" },
+  { id: "likert5", label: "5 уровней согласия" },
+  { id: "yesno", label: "Да / Нет" },
+];
+
+const emptyCpForm = { title: "", agenda: "", dueDays: 30, questions: [], scaleId: "emoji5" };
+
+function CheckpointFormModal({ initial, onClose, onSave }) {
+  const [form, setForm] = React.useState(initial || emptyCpForm);
+  const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
+  const valid = form.title.trim() && form.agenda.trim() && form.dueDays;
+
+  function addQuestion() {
+    setForm((f) => ({ ...f, questions: [...f.questions, { id: "q" + Date.now(), text: "" }] }));
+  }
+  function setQuestionText(id, text) {
+    setForm((f) => ({ ...f, questions: f.questions.map((q) => q.id === id ? { ...q, text } : q) }));
+  }
+  function removeQuestion(id) {
+    setForm((f) => ({ ...f, questions: f.questions.filter((q) => q.id !== id) }));
+  }
+
+  return (
+    <Modal open title={initial ? "Редактировать контрольную точку" : "Новая контрольная точка"} onClose={onClose} size="s"
+      secondary={<Button mode="secondary" onClick={onClose}>Отмена</Button>}
+      primary={<Button variant="accent" disabled={!valid}
+        onClick={() => onSave({ ...form, questions: form.questions.filter((q) => q.text.trim()) })}>
+        {initial ? "Сохранить" : "Добавить"}
+      </Button>}>
+      <div className="sk-col sk-gap-3">
+        <Input label="Название" required value={form.title} onChange={(e) => set("title")(e.target.value || "")} placeholder="Например, Контрольная точка по итогам 30 дней" />
+        <Textarea label="Повестка" required helper="Каждый пункт — с новой строки" rows={3} value={form.agenda} onChange={(e) => set("agenda")(e.target.value || "")} />
+        <Input label="Срок (дней от начала плана)" required type="number" min={1} value={form.dueDays} onChange={(e) => set("dueDays")(Math.max(1, Number(e.target.value) || 1))} />
+
+        <Divider />
+
+        <div className="sk-col sk-gap-2">
+          <div className="sk-label-3">Вопросы для сотрудника{form.questions.length ? " " + form.questions.length : ""}</div>
+          <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>
+            Сотрудник ответит на них прямо на встрече по контрольной точке
+          </div>
+          {form.questions.map((q, i) => (
+            <div key={q.id} className="sk-row sk-gap-2" style={{ alignItems: "center" }}>
+              <Input value={q.text} onChange={(e) => setQuestionText(q.id, e.target.value || "")}
+                placeholder={"Вопрос " + (i + 1)} style={{ flex: 1 }} />
+              <button className="sk-link-btn" onClick={() => removeQuestion(q.id)}>
+                <IconTrash size={15} color="var(--sk-icon-secondary)" />
+              </button>
+            </div>
+          ))}
+          <button className="sk-link-btn sk-label-3-regular" onClick={addQuestion} style={{ alignSelf: "flex-start" }}>+ Добавить вопрос</button>
+        </div>
+
+        {form.questions.length > 0 && (
+          <Select label="Шкала оценки" helper="Общая для всех вопросов этой контрольной точки"
+            value={form.scaleId}
+            options={CHECKPOINT_SCALE_OPTIONS.map((s) => ({ value: s.id, label: s.label }))}
+            onChange={set("scaleId")} />
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function TemplateCheckpointRow({ index, cp, onEdit, onDelete }) {
+  const [hover, setHover] = React.useState(false);
+  return (
+    <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={{
+      display: "flex", alignItems: "flex-start", gap: 10, padding: 10, borderRadius: "var(--sk-radius-3)",
+      border: "1px solid var(--sk-stroke)", background: "var(--sk-surface-page)",
+    }}>
+      <span style={{
+        width: 28, height: 28, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+        font: "var(--sk-label-3)", color: "var(--sk-text-accent)", background: "var(--sk-accent-secondary)",
+      }}>{index}</span>
+      <div className="sk-col sk-gap-1" style={{ flex: 1, minWidth: 0 }}>
+        <span className="sk-label-4">{cp.title}</span>
+        <div className="sk-row sk-gap-1 sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>
+          <IconClock size={13} />День {cp.dueDays} от начала плана{cp.questions && cp.questions.length > 0 ? " · Вопросов: " + cp.questions.length : ""}
+        </div>
+      </div>
+      <div className="sk-row sk-gap-1" style={{ flexShrink: 0, opacity: hover ? 1 : 0, transition: "opacity .12s ease" }}>
+        <Button size="s" mode="tertiary" onClick={onEdit}><IconEdit size={15} /></Button>
+        <Button size="s" mode="tertiary" onClick={onDelete}><IconTrash size={15} /></Button>
+      </div>
+    </div>
+  );
+}
+
+function TemplateCheckpointsSection({ checkpoints, onAdd, onEdit, onDelete }) {
+  const [formModal, setFormModal] = React.useState(null); // null | { mode: "create" } | { mode: "edit", cp }
+  return (
+    <div className="sk-col sk-gap-3">
+      {checkpoints.length === 0 ? (
+        <Card>
+          <div className="sk-col sk-gap-3" style={{ alignItems: "center", textAlign: "center", padding: "24px 16px" }}>
+            <div className="sk-title-5">Запланируйте регулярные встречи с сотрудником</div>
+            <div className="sk-muted" style={{ maxWidth: 440 }}>Контрольные точки помогут фиксировать, как сотрудник справляется и вовремя помочь ему. Рекомендуем добавить 3: на 30 / 60 / 90 дней</div>
+            <Button variant="accent" onClick={() => setFormModal({ mode: "create" })}>Добавить контрольную точку</Button>
+          </div>
+        </Card>
+      ) : (
+        <div className="sk-col sk-gap-3">
+          <div className="sk-row sk-gap-2" style={{ padding: "10px 14px", background: "var(--sk-surface-secondary)", borderRadius: "var(--sk-radius-2)", alignItems: "flex-start" }}>
+            <IconHelpCircle size={15} color="var(--sk-icon-secondary)" style={{ flexShrink: 0, marginTop: 1 }} />
+            <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>Контрольные точки помогут фиксировать, как сотрудник справляется и вовремя помочь ему. Рекомендуем добавить 3 точки: на 30 / 60 / 90 дней</span>
+          </div>
+          <div className="sk-row sk-gap-2">
+            <Button variant="accent" size="s" icon={<IconPlusSm size={16} />} onClick={() => setFormModal({ mode: "create" })}>
+              Добавить контрольную точку
+            </Button>
+          </div>
+          <div className="sk-col sk-gap-2">
+            {checkpoints.map((cp, i) => (
+              <TemplateCheckpointRow key={cp.id} index={i + 1} cp={cp}
+                onEdit={() => setFormModal({ mode: "edit", cp })} onDelete={() => onDelete(cp.id)} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {formModal && (
+        <CheckpointFormModal
+          initial={formModal.mode === "edit" ? { title: formModal.cp.title, agenda: formModal.cp.agenda, dueDays: formModal.cp.dueDays, questions: formModal.cp.questions || [], scaleId: formModal.cp.scaleId || "emoji5" } : null}
+          onClose={() => setFormModal(null)}
+          onSave={(form) => { formModal.mode === "edit" ? onEdit(formModal.cp.id, form) : onAdd(form); setFormModal(null); }} />
+      )}
+    </div>
+  );
+}
+
+// ---------------- Виджет "Кто создает цели?" — фиксированный вариант (SegmentedControl) +
+// подпись с описанием выбранного варианта, вместо отдельного мастера или карточек сценариев. ----------------
+const GOALS_OWNER_OPTIONS = [
+  { id: "manager", label: "Руководитель", description: "Руководитель создаёт цели в плане сотрудника после назначения" },
+  { id: "hr", label: "Администратор" },
+];
+
+function GoalsOwnerPicker({ owner, onChange }) {
+  const active = GOALS_OWNER_OPTIONS.find((o) => o.id === owner);
+  return (
+    <div className="sk-col sk-gap-2">
+      <span className="sk-label-3" style={{ color: "var(--sk-text-primary)" }}>Кто создает цели?</span>
+      <SegmentedControl size="m"
+        items={GOALS_OWNER_OPTIONS.map((o) => ({ id: o.id, label: o.label }))}
+        active={owner} onChange={onChange} style={{ alignSelf: "flex-start" }} />
+      {active && active.description && <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>{active.description}</span>}
+    </div>
+  );
+}
+
+// ---------------- Блок "Цели" — способ создания цели: плитка выбора (та же логика,
+// что и у руководителя в manager/plan.html, но "Из каталога целей" здесь уже реализовано —
+// ведёт в справочник hr/goals-catalog.html; "С AI" пока не реализовано ни у кого). ----------------
+function GoalMethodTile({ icon: Icon, title, variant, disabled, onClick }) {
+  const special = variant === "special";
+  return (
+    <div className={disabled ? "" : "sk-clickable"} onClick={disabled ? undefined : onClick} style={{
+      position: "relative", flex: 1, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center",
+      gap: 10, padding: "20px 14px", borderRadius: "var(--sk-radius-3)",
+      border: "1px solid " + (special ? "transparent" : "var(--sk-stroke)"),
+      background: special ? "var(--sk-special-secondary)" : "var(--sk-surface-page)",
+      cursor: disabled ? "default" : "pointer",
+    }}>
+      <span style={{
+        width: 40, height: 40, borderRadius: "var(--sk-radius-2)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+        background: special ? "var(--sk-surface-page)" : "var(--sk-surface-secondary)",
+        color: special ? "var(--violet-violet-35)" : "var(--sk-icon-secondary)",
+      }}><Icon size={20} /></span>
+      <div className="sk-label-3" style={{ textAlign: "left", color: "var(--sk-text-primary)" }}>{title}</div>
+      {disabled && <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>Скоро будет доступно</div>}
+    </div>
+  );
+}
+
+function GoalMethodModal({ onClose, onManual, onCatalog }) {
+  return (
+    <Modal open title="Как добавить цель?" onClose={onClose} size="l"
+      secondary={<Button mode="secondary" onClick={onClose}>Отменить</Button>}>
+      <div className="sk-row sk-gap-3" style={{ alignItems: "stretch" }}>
+        <GoalMethodTile icon={IconEdit} title="Вручную" onClick={onManual} />
+        <GoalMethodTile icon={IconLayers} title="Из каталога целей" onClick={onCatalog} />
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------- Выбор готовой цели из справочника (hr/goals-catalog.html) — тот же поиск +
+// фильтры (Категория / Должность / Уровень), что и у руководителя в manager/plan.html
+// (GoalCatalogPickerModal), чтобы каталог не расходился на две разные реализации. В шаблоне
+// нет конкретного сотрудника, поэтому фильтр "Должность" не предзаполняется — Админ выбирает
+// его сам, если хочет сузить список. Выбранная цель превращается в обычный черновик и
+// открывается в TemplateGoalCreateDrawer, чтобы HR мог донастроить её перед сохранением в
+// шаблон. Подцели получают новые id — правки после выбора не задевают исходную запись в каталоге. ----------------
+function GoalCatalogPickerModal({ onClose, onPick }) {
+  const D = window.SITE_DATA;
+  const [q, setQ] = React.useState("");
+  const [filters, setFilters] = React.useState({ category: "", position: "", level: "" });
+  const [filtersOpen, setFiltersOpen] = React.useState(false);
+  const catalogActive = (D.goalCatalog || []).filter((g) => !g.archived);
+  const categories = [...new Set(catalogActive.map((g) => g.category).filter(Boolean))];
+  const positions = [...new Set(catalogActive.flatMap((g) => g.positions || []))];
+  const toolbarFilterCount = (filters.category ? 1 : 0) + (filters.position ? 1 : 0) + (filters.level ? 1 : 0);
+  const needle = q.trim().toLowerCase();
+
+  const list = catalogActive.filter((g) => {
+    if (needle && !(g.title.toLowerCase().includes(needle)
+      || g.category.toLowerCase().includes(needle)
+      || (g.positions || []).some((p) => p.toLowerCase().includes(needle)))) return false;
+    if (filters.category && g.category !== filters.category) return false;
+    if (filters.position && !(g.positions || []).includes(filters.position)) return false;
+    if (filters.level && g.level !== filters.level) return false;
+    return true;
+  });
+
+  return (
+    <Modal open title="Выберите цель из каталога" onClose={onClose} size="l" maxHeight="calc(100vh - 64px)"
+      secondary={<Button mode="secondary" onClick={onClose}>Отменить</Button>}>
+      <div className="sk-col sk-gap-3">
+        <div className="sk-row sk-gap-2" style={{ flexWrap: "wrap", alignItems: "center" }}>
+          <Input size="s" icon={<IconSearch size={18} />} placeholder="Поиск по названию, категории, должности"
+            value={q} onChange={(e) => setQ(e.target.value || "")} style={{ flex: 1, minWidth: 220 }} />
+          <Button mode="secondary" icon={<IconFilter size={16} />} onClick={() => setFiltersOpen((o) => !o)}
+            style={{ background: "var(--sk-surface-page)", border: toolbarFilterCount ? "1px solid var(--sk-stroke-accent)" : "1px solid var(--sk-stroke)" }}>
+            <span className="sk-row sk-gap-1" style={{ alignItems: "center" }}>
+              Фильтры{toolbarFilterCount ? " · " + toolbarFilterCount : ""}
+              {toolbarFilterCount > 0 && (
+                <span onClick={(e) => { e.stopPropagation(); setFilters({ category: "", position: "", level: "" }); }}
+                  style={{ display: "inline-flex", opacity: 0.6, marginLeft: 2 }}>
+                  <IconX size={14} />
+                </span>
+              )}
+            </span>
+          </Button>
+        </div>
+        {filtersOpen && (
+          <div className="sk-row sk-gap-2" style={{ flexWrap: "wrap" }}>
+            <FilterChip label="Категория" options={categories.map((v) => ({ value: v, label: v }))}
+              value={filters.category} onChange={(v) => setFilters((f) => ({ ...f, category: v }))} />
+            <FilterChip label="Должность" options={positions.map((v) => ({ value: v, label: v }))}
+              value={filters.position} onChange={(v) => setFilters((f) => ({ ...f, position: v }))} />
+            <FilterChip label="Уровень" options={(D.goalLevels || []).map((v) => ({ value: v, label: v }))}
+              value={filters.level} onChange={(v) => setFilters((f) => ({ ...f, level: v }))} />
+          </div>
+        )}
+
+        <div className="sk-col sk-gap-2 sk-modal-scroll" style={{ paddingTop: 8 }}>
+          {list.map((g) => <CatalogGoalRow key={g.id} goal={g} onClick={() => onPick(g)} />)}
+          {!list.length && <div className="sk-muted" style={{ padding: "16px 0", textAlign: "center" }}>Ничего не нашлось — попробуйте изменить запрос или фильтры.</div>}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// Чип одиночного фильтра (Категория/Должность/Уровень — один выбор, не массив) — идентичен
+// FilterChip из manager/plan.html, чтобы у Админа и руководителя каталог выглядел одинаково.
+function FilterChip({ label, options, value, onChange }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+  const selected = options.find((o) => o.value === value);
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button type="button" onClick={() => setOpen((o) => !o)} className="sk-clickable" style={{
+        display: "inline-flex", alignItems: "center", gap: 6, height: 36, padding: "0 12px",
+        borderRadius: "var(--sk-radius-2)", cursor: "pointer", whiteSpace: "nowrap",
+        border: open ? "1px solid var(--sk-stroke-accent)" : "1px solid var(--sk-stroke)",
+        background: "var(--sk-surface-page)", font: "var(--sk-label-3-regular)", color: "var(--sk-text-primary)",
+      }}>
+        {label}{selected ? ": " + selected.label : ""}
+        {value ? (
+          <span onClick={(e) => { e.stopPropagation(); onChange(""); }} style={{ display: "inline-flex", opacity: 0.55 }}>
+            <IconX size={13} />
+          </span>
+        ) : (
+          <IconChevronDown size={14} style={{ opacity: 0.55 }} />
+        )}
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 20, minWidth: 200, maxHeight: 300, overflowY: "auto",
+          background: "var(--sk-surface-page)", borderRadius: "var(--sk-radius-2)", boxShadow: "var(--sk-shadow-m)", padding: 6,
+        }}>
+          {options.map((o) => (
+            <button key={o.value} onClick={() => { onChange(o.value === value ? "" : o.value); setOpen(false); }} style={{
+              display: "block", width: "100%", textAlign: "left", padding: "8px 10px", borderRadius: "var(--sk-radius-2)",
+              border: "none", background: "transparent", cursor: "pointer", font: "var(--sk-label-3-regular)", color: "var(--sk-text-primary)",
+            }}>{o.label}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Строка цели в каталоге — идентична CatalogGoalRow из manager/plan.html.
+function CatalogGoalRow({ goal, onClick }) {
+  const stepsCount = (goal.subgoals || []).length;
+  return (
+    <div className="sk-clickable" onClick={onClick} style={{
+      display: "flex", gap: 12, alignItems: "center", padding: "12px 14px",
+      border: "1px solid var(--sk-stroke)", borderRadius: "var(--sk-radius-3)",
+    }}>
+      <span style={{
+        width: 32, height: 32, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+        background: "var(--sk-accent-secondary)", color: "var(--sk-text-accent)",
+      }}><IconTarget size={16} /></span>
+      <div className="sk-col sk-gap-1" style={{ flex: 1, minWidth: 0 }}>
+        <span className="sk-label-3">{goal.title}</span>
+        <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>
+          {goal.category}{goal.level ? " · " + goal.level : ""} · {stepsCount} {pluralSteps(stepsCount)}
+          {(goal.positions || []).length ? " · " + goal.positions.join(", ") : ""}
+        </span>
+      </div>
+      <IconChevronRight size={16} color="var(--sk-icon-secondary)" />
+    </div>
+  );
+}
+
+// ---------------- Проверка выполнения шага — идентично StepAssessmentPicker из manager/plan.html:
+// HR может привязать готовый оценочный лист из общего справочника D.assessmentTemplates либо
+// оставить шаг без него, тогда итог выставляется на усмотрение проверяющего. ----------------
+function StepAssessmentPicker({ templateId, setTemplateId }) {
+  const D = window.SITE_DATA;
+  const templates = D.assessmentTemplates || [];
+  const checked = !!templateId;
+
+  function toggle() {
+    setTemplateId(checked ? null : (templates[0] && templates[0].id));
+  }
+
+  return (
+    <div className="sk-col sk-gap-1">
+      <div className="sk-row sk-gap-3 sk-clickable" style={{ alignItems: "flex-start" }} onClick={toggle}>
+        <div style={{ paddingTop: 1 }}><Checkbox checked={checked} onChange={toggle} /></div>
+        <span className="sk-label-4">Добавить оценочный лист</span>
+      </div>
+      <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)", marginLeft: 32 }}>Готовые критерии помогут оценить промежуточный результат</span>
+      <div style={{ marginLeft: 32, marginTop: 8 }}>
+        {checked ? (
+          <React.Fragment>
+            <Select value={templateId} options={templates.map((t) => ({ value: t.id, label: t.title }))} onChange={setTemplateId} />
+            <div style={{ height: 220 }} />
+          </React.Fragment>
+        ) : (
+          <div style={{ padding: "12px 14px", background: "var(--sk-surface-secondary)", borderRadius: "var(--sk-radius-2)" }}>
+            <span className="sk-label-3-regular">
+              Без оценочного листа итог выставляется на усмотрение проверяющего: «Шаг выполнен», «Не выполнен» или «Требует доработки».
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------- Полезные материалы шага — тот же UI, что и у руководителя в
+// manager/plan.html (StepMaterialsPicker): пилюли выбранных материалов + модалка с поиском
+// и чекбоксами. Источник списка — общий каталог материалов шаблона (у шаблона нет чек-листа
+// назначенного плана с конкретными задачами, поэтому список берётся из отдельного каталога,
+// а не из plan.stages, как у руководителя). ----------------
+const ELEMENT_LABEL = { article: "Статья", task: "Задача", course: "Курс", file: "Файл", link: "Ссылка", survey: "Опрос" };
+const ELEMENT_ICON = { article: IconFileText, task: IconClipboard, course: IconGraduationCap, file: IconFileText, link: IconLink2, survey: IconMessageCircle };
+// Порядок типов элемента чек-листа в селекте создания — "Задача" первой, т.к. только у неё есть поле "Исполнитель" (см. ТЗ "Доработки прототипа_Задачи и Роли").
+const CHECKLIST_ITEM_TYPES = ["task", "survey", "article", "course", "file", "link"];
+
+function TemplateMaterialsPicker({ materials, onAdd, onRemove }) {
+  const D = window.SITE_DATA;
+  const [open, setOpen] = React.useState(false);
+  const [q, setQ] = React.useState("");
+  const allItems = D.templateMaterialsCatalog || [];
+  const list = q.trim() ? allItems.filter((item) => item.title.toLowerCase().includes(q.trim().toLowerCase())) : allItems;
+  const selectedIds = materials.map((m) => m.id);
+  const selectedItems = materials.map((m) => allItems.find((item) => item.id === m.id)).filter(Boolean);
+
+  function toggle(item) {
+    if (selectedIds.includes(item.id)) onRemove(item.id);
+    else onAdd({ id: item.id, title: item.title, kind: item.kind });
+  }
+
+  return (
+    <div className="sk-col sk-gap-2">
+      <span className="sk-label-3" style={{ color: "var(--sk-text-primary)" }}>Полезные материалы</span>
+      {selectedItems.length ? (
+        <div className="sk-col sk-gap-2">
+          {selectedItems.map((item) => (
+            <div key={item.id} className="sk-row" style={{ justifyContent: "space-between", padding: 10, background: "var(--sk-surface-secondary)", borderRadius: "var(--sk-radius-2)" }}>
+              <div className="sk-col sk-gap-1">
+                <div className="sk-label-4">{item.title}</div>
+                <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>{ELEMENT_LABEL[item.kind]}</div>
+              </div>
+              <button className="sk-link-btn" onClick={() => onRemove(item.id)}><IconX size={15} color="var(--sk-icon-secondary)" /></button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>Материалы помогут сотруднику разобраться, что нужно сделать</span>
+      )}
+      <button className="sk-link-btn sk-label-3-regular" onClick={() => setOpen(true)}
+        style={{ alignSelf: "flex-start", color: "var(--sk-text-accent)" }}>
+        <span className="sk-row sk-gap-1"><IconPlusSm size={16} />Добавить</span>
+      </button>
+
+      {open && (
+        <Modal open title="Полезные материалы" onClose={() => setOpen(false)} size="m"
+          secondary={<Button mode="secondary" onClick={() => setOpen(false)}>Отменить</Button>}
+          primary={<Button onClick={() => setOpen(false)}>Готово</Button>}
+          options={<Input icon={<IconSearch size={18} />} placeholder="Поиск по названию" value={q} onChange={(e) => setQ(e.target.value || "")} />}>
+          <div className="sk-col sk-gap-1 sk-modal-scroll">
+            {list.map((item) => (
+              <div key={item.id} className="sk-row sk-gap-3 sk-clickable" style={{ padding: "10px 4px" }} onClick={() => toggle(item)}>
+                <Checkbox checked={selectedIds.includes(item.id)} onChange={() => toggle(item)} />
+                <div className="sk-col sk-gap-1" style={{ flex: 1 }}>
+                  <div className="sk-label-3-regular">{item.title}</div>
+                  <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>{ELEMENT_LABEL[item.kind]}</div>
+                </div>
+              </div>
+            ))}
+            {!list.length && <div className="sk-muted" style={{ padding: "16px 0", textAlign: "center" }}>Ничего не нашлось</div>}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+const emptySubgoalForm = { title: "", description: "", dueDays: 14, reviewer: "Руководитель", materials: [], templateId: null };
+
+function SubgoalFormModal({ initial, onClose, onCreate }) {
+  const [form, setForm] = React.useState(initial || emptySubgoalForm);
+  const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
+  const canCreate = form.title.trim().length > 0;
+  return (
+    <Modal open title="Промежуточный результат" onClose={onClose} size="m" maxHeight="calc(100vh - 64px)"
+      secondary={<Button mode="secondary" onClick={onClose}>Отменить</Button>}
+      primary={<Button disabled={!canCreate} onClick={() => onCreate(form)}>{initial ? "Сохранить" : "Добавить"}</Button>}>
+      <div className="sk-col sk-gap-4">
+        <div className="sk-col sk-gap-2">
+          <Input label="Название" required value={form.title} onChange={(e) => set("title")(e.target.value || "")} />
+          <Textarea label="Описание" rows={2} maxLength={1000} value={form.description} onChange={(e) => set("description")(e.target.value || "")} />
+        </div>
+        <div className="sk-row sk-gap-3">
+          <Input label="Срок (дней от начала плана)" required type="number" min={1} value={form.dueDays}
+            onChange={(e) => set("dueDays")(Math.max(1, Number(e.target.value) || 1))} style={{ flex: 1 }} />
+          <Select label="Проверяющий" value={form.reviewer}
+            options={[{ value: "Руководитель", label: "Руководитель" }, { value: "Наставник", label: "Наставник" }]}
+            onChange={set("reviewer")} style={{ flex: 1 }} />
+        </div>
+        <Divider />
+        <div className="sk-col sk-gap-3">
+          <span className="sk-label-3" style={{ color: "var(--sk-text-primary)" }}>Проверка выполнения шага</span>
+          <StepAssessmentPicker templateId={form.templateId} setTemplateId={set("templateId")} />
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function TemplateGoalCreateDrawer({ draft, setDraft, onClose, onCreate, onAddSubgoal }) {
+  const canCreate = draft.title.trim().length > 0;
+  const [dragIndex, setDragIndex] = React.useState(null);
+  function reorder(from, to) {
+    if (from === null || from === to) return;
+    setDraft((d) => {
+      const list = d.subgoals.slice();
+      const [item] = list.splice(from, 1);
+      list.splice(to, 0, item);
+      return { ...d, subgoals: list };
+    });
+  }
+  return (
+    <Drawer open title="Создание цели адаптации" onClose={onClose} size="s"
+      primary={<Button disabled={!canCreate} onClick={onCreate}>Создать</Button>}
+      secondary={<Button mode="secondary" onClick={onClose}>Отменить</Button>}>
+      <div className="sk-col sk-gap-4">
+        <Input label="Название" required placeholder="Что сотрудник должен выполнить к окончанию периода адаптации"
+          value={draft.title} onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value || "" }))} />
+        <Textarea label="Описание" rows={4} maxLength={1000} showCount
+          placeholder="Подробнее о цели: как оценивается результат, что поможет успешному достижению"
+          value={draft.description} onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value || "" }))} />
+        <Input label="Срок (дней от начала плана)" required type="number" min={1} value={draft.dueDays}
+          onChange={(e) => setDraft((d) => ({ ...d, dueDays: Math.max(1, Number(e.target.value) || 1) }))} />
+
+        <div className="sk-col sk-gap-2">
+          <div className="sk-label-3">Промежуточные результаты{draft.subgoals.length ? " " + draft.subgoals.length : ""}</div>
+          <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>
+            Разбейте цель на промежуточные результаты — то, что сотрудник должен показать на пути к ней. Можно добавить сейчас или позже, после создания цели.
+          </div>
+          {draft.subgoals.map((sg, i) => (
+            <div key={i} className="sk-row sk-gap-2" style={{
+              alignItems: "center", padding: "10px 4px", borderBottom: "1px solid var(--sk-stroke)", opacity: dragIndex === i ? 0.5 : 1,
+            }}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => { reorder(dragIndex, i); setDragIndex(null); }}>
+              <span draggable onDragStart={() => setDragIndex(i)} onDragEnd={() => setDragIndex(null)}
+                style={{ display: "flex", flexShrink: 0, cursor: "grab" }}>
+                <IconGripVertical size={16} color="var(--sk-icon-secondary)" />
+              </span>
+              <span style={{
+                width: 26, height: 26, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                background: "var(--sk-special-secondary)", color: "var(--text-text-special)", font: "var(--sk-label-4)",
+              }}>{i + 1}</span>
+              <div className="sk-col sk-gap-1" style={{ flex: 1, minWidth: 0 }}>
+                <div className="sk-label-4">{sg.title}</div>
+                <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>{dueDayLabel(sg.dueDays)}</div>
+              </div>
+              <button className="sk-link-btn" onClick={() => setDraft((d) => ({ ...d, subgoals: d.subgoals.filter((_, ix) => ix !== i) }))}>
+                <IconTrash size={15} color="var(--sk-icon-secondary)" />
+              </button>
+            </div>
+          ))}
+          <button className="sk-link-btn sk-label-3-regular" onClick={onAddSubgoal} style={{ alignSelf: "flex-start" }}>+ Добавить</button>
+        </div>
+      </div>
+    </Drawer>
+  );
+}
+
+// ---------------- Строка шага внутри дровера цели — номер в синем кружке слева (вместо
+// серой плашки-фона) + ручка перетаскивания; список шагов можно переупорядочить
+// drag-and-drop'ом (см. TemplateGoalDrawer, который передаёт dragHandleProps и index/dragging).
+// Без статус-иконки: до назначения плана сотруднику у шага ещё нет статуса выполнения. ----------------
+function TemplateSubgoalRow({ index, subgoal, onOpen, dragHandleProps, dragging }) {
+  const hasMaterials = (subgoal.materials || []).length > 0;
+  return (
+    <div className="sk-row sk-gap-2" style={{ alignItems: "center", padding: "10px 4px", borderBottom: "1px solid var(--sk-stroke)", opacity: dragging ? 0.5 : 1 }}>
+      <span {...dragHandleProps} style={{ display: "flex", flexShrink: 0, cursor: "grab" }}>
+        <IconGripVertical size={16} color="var(--sk-icon-secondary)" />
+      </span>
+      <span style={{
+        width: 26, height: 26, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+        background: "var(--sk-special-secondary)", color: "var(--text-text-special)", font: "var(--sk-label-4)",
+      }}>{index}</span>
+      <div className="sk-row sk-gap-2 sk-clickable" onClick={onOpen} style={{ alignItems: "center", flex: 1, minWidth: 0 }}>
+        <div className="sk-col sk-gap-1" style={{ flex: 1, minWidth: 0 }}>
+          <span className="sk-label-3-regular">{subgoal.title || "Без названия"}</span>
+          <span className="sk-row sk-gap-1 sk-muted" style={{ font: "var(--sk-label-4-regular)", alignItems: "center" }}>
+            <IconCalendar size={13} color="var(--sk-icon-secondary)" />{dueDayLabel(subgoal.dueDays)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------- Дровер цели: просмотр/редактирование — структура 1-в-1 с GoalDrawer
+// руководителя (manager/plan.html), но без прогресса и статусов (их не существует до
+// назначения плана сотруднику) и без кнопки "Опубликовать" — у HR цель создаётся сразу. ----------------
+function TemplateGoalDrawer({ goal, onClose, onChange, onAddSubgoal, onOpenSubgoal, onDeleteSubgoal }) {
+  const [dragIndex, setDragIndex] = React.useState(null);
+  function reorder(from, to) {
+    if (from === null || from === to) return;
+    const list = goal.subgoals.slice();
+    const [item] = list.splice(from, 1);
+    list.splice(to, 0, item);
+    onChange({ subgoals: list });
+  }
+  return (
+    <Drawer open title="Цель адаптации" onClose={onClose} size="s">
+      <div className="sk-col sk-gap-4">
+        <Input label="Название" required value={goal.title} onChange={(e) => onChange({ title: e.target.value || "" })} />
+        <Textarea label="Описание" rows={3} maxLength={1000} showCount value={goal.description}
+          onChange={(e) => onChange({ description: e.target.value || "" })} />
+        <Input label="Срок (дней от начала плана)" required type="number" min={1} value={goal.dueDays}
+          onChange={(e) => onChange({ dueDays: Math.max(1, Number(e.target.value) || 1) })} />
+
+        <div className="sk-col sk-gap-2">
+          <div className="sk-label-3">Промежуточные результаты{goal.subgoals.length ? " " + goal.subgoals.length : ""}</div>
+          {goal.subgoals.length ? (
+            goal.subgoals.map((sg, i) => (
+              <div key={sg.id} className="sk-row sk-gap-2" style={{ alignItems: "center" }}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => { reorder(dragIndex, i); setDragIndex(null); }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <TemplateSubgoalRow index={i + 1} subgoal={sg} onOpen={() => onOpenSubgoal(sg.id)}
+                    dragging={dragIndex === i}
+                    dragHandleProps={{ draggable: true, onDragStart: () => setDragIndex(i), onDragEnd: () => setDragIndex(null) }} />
+                </div>
+                <button className="sk-link-btn" onClick={() => onDeleteSubgoal(sg.id)}><IconTrash size={15} color="var(--sk-icon-secondary)" /></button>
+              </div>
+            ))
+          ) : (
+            <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>Промежуточные результаты ещё не добавлены</span>
+          )}
+          <button className="sk-link-btn sk-label-3-regular" onClick={onAddSubgoal} style={{ alignSelf: "flex-start" }}>+ Добавить</button>
+        </div>
+      </div>
+    </Drawer>
+  );
+}
+
+function TemplateGoalRow({ goal, onOpen, onDelete, onOpenSubgoal, onReorderSubgoals }) {
+  const [dragIndex, setDragIndex] = React.useState(null);
+  return (
+    <div className="sk-col sk-gap-3" style={{ padding: 14, border: "1px solid var(--sk-stroke)", borderRadius: "var(--sk-radius-3)", background: "var(--sk-surface-page)" }}>
+      <div className="sk-row sk-gap-3 sk-clickable" onClick={onOpen} style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div className="sk-row sk-gap-2" style={{ flex: 1, minWidth: 0 }}>
+          <span style={{
+            width: 26, height: 26, marginTop: 2, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+            background: "var(--sk-accent-secondary)", color: "var(--sk-text-accent)",
+          }}><IconGoalRing size={15} /></span>
+          <div className="sk-col sk-gap-1" style={{ flex: 1, minWidth: 0 }}>
+            <div className="sk-title-5">{goal.title || "Без названия"}</div>
+            <span className="sk-row sk-gap-1 sk-muted" style={{ font: "var(--sk-label-4-regular)", alignItems: "center" }}>
+              <IconCalendar size={13} color="var(--sk-icon-secondary)" />{dueDayLabel(goal.dueDays)}
+            </span>
+          </div>
+        </div>
+        <div className="sk-row sk-gap-1" style={{ flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+          <Button size="s" mode="tertiary" onClick={onDelete}><IconTrash size={15} /></Button>
+        </div>
+      </div>
+      {goal.subgoals.length ? (
+        <div className="sk-col">
+          {goal.subgoals.map((sg, i) => (
+            <div key={sg.id} onDragOver={(e) => e.preventDefault()}
+              onDrop={() => { onReorderSubgoals(dragIndex, i); setDragIndex(null); }}>
+              <TemplateSubgoalRow index={i + 1} subgoal={sg} onOpen={() => onOpenSubgoal(sg.id)}
+                dragging={dragIndex === i}
+                dragHandleProps={{ draggable: true, onDragStart: () => setDragIndex(i), onDragEnd: () => setDragIndex(null) }} />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>Промежуточные результаты ещё не добавлены</span>
+      )}
+    </div>
+  );
+}
+
+
+// ---------------- Секция "Цели" внутри единого контейнера плана: выбор владельца + условная
+// логика сценария, раскрывающаяся последовательно — пользователь видит только те поля,
+// которые нужны для выбранной логики (см. GOALS_OWNER_OPTIONS и итоговую таблицу в ТЗ). ----------------
+function GoalsSection({ owner, deadlineDays, reviewRequired, reviewDeadlineDays, goals,
+  onOwnerChange, onDeadlineChange, onReviewRequiredChange, onReviewDeadlineChange,
+  onAddGoal, onUpdateGoal, onDeleteGoal }) {
+  const [methodModal, setMethodModal] = React.useState(false);
+  const [catalogPicker, setCatalogPicker] = React.useState(false);
+  const [goalDraft, setGoalDraft] = React.useState(null);
+  const [createSubgoalModal, setCreateSubgoalModal] = React.useState(false);
+  const [openGoalId, setOpenGoalId] = React.useState(null);
+  const [openSubgoalId, setOpenSubgoalId] = React.useState(null);
+  const [openRowSubgoalId, setOpenRowSubgoalId] = React.useState(null);
+
+  const openGoal = goals.find((g) => g.id === openGoalId) || null;
+  const openSubgoal = openGoal ? (openGoal.subgoals.find((sg) => sg.id === openSubgoalId) || null) : null;
+  const openRowGoal = openRowSubgoalId ? goals.find((g) => g.subgoals.some((sg) => sg.id === openRowSubgoalId)) : null;
+  const openRowSubgoal = openRowGoal ? openRowGoal.subgoals.find((sg) => sg.id === openRowSubgoalId) : null;
+
+  function startManualGoal() {
+    setMethodModal(false);
+    setGoalDraft({ title: "", description: "", dueDays: 30, subgoals: [] });
+  }
+  function pickFromCatalog(g) {
+    setCatalogPicker(false);
+    setGoalDraft({
+      title: g.title, description: g.description, dueDays: g.dueDays || 30,
+      subgoals: (g.subgoals || []).map((sg, i) => ({ ...sg, id: "sg" + Date.now() + "_" + i })),
+    });
+  }
+  function createGoal() {
+    onAddGoal(goalDraft);
+    setGoalDraft(null);
+  }
+  function changeOpenGoal(patch) {
+    onUpdateGoal(openGoalId, (g) => ({ ...g, ...patch }));
+  }
+  function addSubgoalToOpenGoal(form) {
+    onUpdateGoal(openGoalId, (g) => ({ ...g, subgoals: [...g.subgoals, { id: "sg" + Date.now(), ...form }] }));
+  }
+  function saveOpenSubgoal(form) {
+    onUpdateGoal(openGoalId, (g) => ({ ...g, subgoals: g.subgoals.map((sg) => sg.id === openSubgoalId ? { ...sg, ...form } : sg) }));
+    setOpenSubgoalId(null);
+  }
+  function deleteOpenSubgoal(id) {
+    onUpdateGoal(openGoalId, (g) => ({ ...g, subgoals: g.subgoals.filter((sg) => sg.id !== id) }));
+  }
+  function saveRowSubgoal(form) {
+    onUpdateGoal(openRowGoal.id, (g) => ({ ...g, subgoals: g.subgoals.map((sg) => sg.id === openRowSubgoalId ? { ...sg, ...form } : sg) }));
+    setOpenRowSubgoalId(null);
+  }
+
+  return (
+    <div className="sk-col sk-gap-5" style={{ padding: "20px 24px" }}>
+      <GoalsOwnerPicker owner={owner} onChange={onOwnerChange} />
+
+      {owner === "manager" ? (
+        <div className="sk-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <div className="sk-row sk-gap-1" style={{ color: "var(--sk-text-primary)" }}>
+            <span className="sk-label-3-regular">Срок постановки целей после назначения плана (дней)</span>
+            <Tooltip content={<div style={{ maxWidth: 260, whiteSpace: "normal" }}>Руководитель создаст цели и опубликует их сотруднику в течение указанного срока.</div>}>
+              <IconHelpCircle size={16} color="var(--sk-icon-secondary)" />
+            </Tooltip>
+          </div>
+          <Input type="number" min={1} max={30} value={deadlineDays}
+            onChange={(e) => onDeadlineChange(Math.max(1, Math.min(30, Number(e.target.value) || 1)))}
+            style={{ width: 88 }} />
+        </div>
+      ) : (
+        <div className="sk-col sk-gap-5">
+          <div className="sk-col sk-gap-3">
+            {goals.length === 0 ? (
+              <Card>
+                <div className="sk-col sk-gap-3" style={{ alignItems: "center", textAlign: "center", padding: "24px 16px" }}>
+                  <div className="sk-title-5">Сформируйте цели и шаги для их достижения</div>
+                  <div className="sk-muted" style={{ maxWidth: 440 }}>Цель — это ожидаемый измеримый результат, с которым сотрудник должен окончить план адаптации</div>
+                  <Button variant="accent" onClick={() => setMethodModal(true)}>+ Добавить цель</Button>
+                </div>
+              </Card>
+            ) : (
+              <div className="sk-col sk-gap-3">
+                <div className="sk-row sk-gap-2" style={{ justifyContent: "flex-end" }}>
+                  <Button variant="accent" size="s" icon={<IconPlusSm size={16} />} onClick={() => setMethodModal(true)}>Добавить цель</Button>
+                </div>
+
+                <div className="sk-col sk-gap-2">
+                  {goals.map((g) => (
+                    <TemplateGoalRow key={g.id} goal={g} onOpen={() => setOpenGoalId(g.id)} onDelete={() => onDeleteGoal(g.id)}
+                      onOpenSubgoal={(id) => setOpenRowSubgoalId(id)}
+                      onReorderSubgoals={(from, to) => {
+                        if (from === null || from === to) return;
+                        onUpdateGoal(g.id, (goal) => {
+                          const list = goal.subgoals.slice();
+                          const [item] = list.splice(from, 1);
+                          list.splice(to, 0, item);
+                          return { ...goal, subgoals: list };
+                        });
+                      }} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="sk-col sk-gap-3" style={{ padding: 16, borderRadius: "var(--sk-radius-3)", background: "var(--sk-surface-secondary)" }}>
+            <div className="sk-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <span className="sk-label-3">Руководитель должен проверить и опубликовать цели</span>
+              <Switch checked={reviewRequired} onChange={onReviewRequiredChange} />
+            </div>
+            {reviewRequired && (
+              <div className="sk-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                <span className="sk-label-3-regular">Срок доработки и публикации целей руководителем (дней)</span>
+                <Input type="number" min={1} max={30} value={reviewDeadlineDays}
+                  onChange={(e) => onReviewDeadlineChange(Math.max(1, Math.min(30, Number(e.target.value) || 1)))}
+                  style={{ width: 88 }} />
+              </div>
+            )}
+            <Alert hue="accent" style={{ background: "var(--sk-surface-page)" }}>
+              Если включить — руководитель сможет доработать цели и опубликовать их сотруднику сам. Если оставить выключенным — цели публикует администратор.
+            </Alert>
+          </div>
+        </div>
+      )}
+
+      {methodModal && (
+        <GoalMethodModal onClose={() => setMethodModal(false)} onManual={startManualGoal}
+          onCatalog={() => { setMethodModal(false); setCatalogPicker(true); }} />
+      )}
+      {catalogPicker && <GoalCatalogPickerModal onClose={() => setCatalogPicker(false)} onPick={pickFromCatalog} />}
+      {goalDraft && (
+        <TemplateGoalCreateDrawer draft={goalDraft} setDraft={setGoalDraft} onClose={() => setGoalDraft(null)}
+          onCreate={createGoal} onAddSubgoal={() => setCreateSubgoalModal(true)} />
+      )}
+      {createSubgoalModal === true && (
+        <SubgoalFormModal onClose={() => setCreateSubgoalModal(false)}
+          onCreate={(form) => {
+            setGoalDraft((d) => ({ ...d, subgoals: [...d.subgoals, { id: "sg" + Date.now(), ...form }] }));
+            setCreateSubgoalModal(false);
+          }} />
+      )}
+
+      {openGoal && !openSubgoalId && (
+        <TemplateGoalDrawer goal={openGoal} onClose={() => setOpenGoalId(null)} onChange={changeOpenGoal}
+          onAddSubgoal={() => setCreateSubgoalModal("inline")}
+          onOpenSubgoal={(id) => setOpenSubgoalId(id)} onDeleteSubgoal={deleteOpenSubgoal} />
+      )}
+      {openGoal && createSubgoalModal === "inline" && (
+        <SubgoalFormModal onClose={() => setCreateSubgoalModal(false)}
+          onCreate={(form) => { addSubgoalToOpenGoal(form); setCreateSubgoalModal(false); }} />
+      )}
+      {openSubgoal && (
+        <SubgoalFormModal initial={openSubgoal} onClose={() => setOpenSubgoalId(null)} onCreate={saveOpenSubgoal} />
+      )}
+      {openRowSubgoal && (
+        <SubgoalFormModal initial={openRowSubgoal} onClose={() => setOpenRowSubgoalId(null)} onCreate={saveRowSubgoal} />
+      )}
+    </div>
+  );
+}
+
+function CheckpointsSection({ checkpoints, onAddCheckpoint, onEditCheckpoint, onDeleteCheckpoint }) {
+  return (
+    <div className="sk-col sk-gap-3" style={{ padding: "20px 24px" }}>
+      <TemplateCheckpointsSection checkpoints={checkpoints}
+        onAdd={onAddCheckpoint} onEdit={onEditCheckpoint} onDelete={onDeleteCheckpoint} />
+    </div>
+  );
+}
+
+// ---------------- Настройка плана адаптации — тумблер в одной карточке; когда план включён,
+// ниже появляется ОТДЕЛЬНАЯ карточка со своей обводкой, где табы "Цели" / "Контрольные точки"
+// переключают видимую секцию — так Админ сразу видит обе настройки и переключается без скролла. ----------------
+function GoalsSettingsCard({ template, enabled, owner, deadlineDays, reviewRequired, reviewDeadlineDays, goals, checkpoints,
+  onToggle, onOwnerChange, onDeadlineChange, onReviewRequiredChange, onReviewDeadlineChange, onAddGoal, onUpdateGoal, onDeleteGoal,
+  onAddCheckpoint, onEditCheckpoint, onDeleteCheckpoint }) {
+  const [tab, setTab] = React.useState("goals");
+  const tabs = [
+    { id: "goals", label: "Цели", count: goals.length || undefined },
+    { id: "checkpoints", label: "Контрольные точки", count: checkpoints.length || undefined },
+  ];
+  return (
+    <div className="sk-col sk-gap-4">
+      <Card bordered style={{ padding: 0, overflow: "hidden" }}>
+        <div className="sk-col">
+          <div style={{ padding: "14px 24px", background: "var(--sk-surface-secondary)" }}>
+            <div className="sk-title-5">Настройка плана адаптации</div>
+          </div>
+          <div className="sk-row" style={{ justifyContent: "space-between", padding: "16px 24px" }}>
+            <div className="sk-row sk-gap-1">
+              <span className="sk-label-3">Включить план адаптации с целями</span>
+              <Tooltip content={<div style={{ maxWidth: 260, whiteSpace: "normal" }}>В этом плане сотруднику можно поставить цели, шаги к ним и полезные материалы. С этим планом сотрудник не просто проходит чек-лист, а приближается к тому, чтобы перформить в своей роли.</div>}>
+                <IconHelpCircle size={16} color="var(--sk-icon-secondary)" />
+              </Tooltip>
+            </div>
+            <Switch checked={enabled} onChange={onToggle} />
+          </div>
+        </div>
+      </Card>
+
+      {enabled && (
+        <Card bordered style={{ padding: 0, overflow: "hidden" }}>
+          <div className="sk-col">
+            <div style={{ padding: "12px 24px 0", "--sk-accent": "var(--sk-text-primary)" }}>
+              <Tabs items={tabs} active={tab} onChange={setTab} />
+            </div>
+            <div style={{ minHeight: 360 }}>
+              {tab === "goals" ? (
+                <GoalsSection owner={owner} deadlineDays={deadlineDays}
+                  reviewRequired={reviewRequired} reviewDeadlineDays={reviewDeadlineDays} goals={goals}
+                  onOwnerChange={onOwnerChange} onDeadlineChange={onDeadlineChange}
+                  onReviewRequiredChange={onReviewRequiredChange} onReviewDeadlineChange={onReviewDeadlineChange}
+                  onAddGoal={onAddGoal} onUpdateGoal={onUpdateGoal} onDeleteGoal={onDeleteGoal} />
+              ) : (
+                <CheckpointsSection checkpoints={checkpoints}
+                  onAddCheckpoint={onAddCheckpoint} onEditCheckpoint={onEditCheckpoint} onDeleteCheckpoint={onDeleteCheckpoint} />
+              )}
+            </div>
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Участники плана, Описание, Чек-лист и Задачи — по ТЗ "Доработки прототипа_Задачи и Роли".
+// Ключевая идея: template.tasks — один плоский массив, а не два независимых списка для
+// чек-листа и вкладки "Задачи". stageId != null значит "показывается внутри этапа чек-листа
+// и во вкладке Задачи", stageId === null — "задача вне этапа, только во вкладке Задачи".
+// Редактирование в любом месте меняет один и тот же объект — синхронизация не нужна.
+// ============================================================================
+
+function roleLabel(p) {
+  const D = window.SITE_DATA;
+  const catalog = p.kind === "system" ? D.systemRoles : D.businessRolesCatalog;
+  const found = (catalog || []).find((r) => r.id === p.roleId);
+  return found ? found.label : p.roleId;
+}
+function roleSource(p) {
+  if (p.kind !== "system") return "Назначается при создании индивидуального плана";
+  const D = window.SITE_DATA;
+  const found = (D.systemRoles || []).find((r) => r.id === p.roleId);
+  return found ? found.source : "";
+}
+
+// ---------------- Строка участника плана — системная или бизнес-роль, в двух режимах:
+// "Шаблон" (роль без человека) и "После назначения" (превью п.4 ТЗ — роль, разрешённая
+// в конкретного человека через template.participants[].demoPerson; если demoPerson нет,
+// показывается состояние "участник не назначен", см. п.12 обязательных состояний). ----------------
+function ParticipantRow({ p, taskCount, assignedMode, onEdit, onDelete, onAssign }) {
+  const resolved = p.demoPerson || null;
+  return (
+    <div className="sk-row sk-gap-3" style={{
+      alignItems: "center", padding: "12px 14px", border: "1px solid var(--sk-stroke)", borderRadius: "var(--sk-radius-3)",
+      background: "var(--sk-surface-page)",
+    }}>
+      {assignedMode ? (
+        resolved ? (
+          <Avatar src={personPhoto(resolved.name)} name={resolved.name} size={32} />
+        ) : (
+          <span style={{
+            width: 32, height: 32, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+            background: "var(--sk-negative-secondary)", color: "var(--sk-icon-negative)",
+          }}><IconAlertCircle size={16} /></span>
+        )
+      ) : (
+        <span style={{
+          width: 32, height: 32, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+          background: p.kind === "system" ? "var(--sk-accent-secondary)" : "var(--sk-special-secondary)",
+          color: p.kind === "system" ? "var(--sk-text-accent)" : "var(--text-text-special)",
+        }}><IconUsers size={15} /></span>
+      )}
+
+      <div className="sk-col sk-gap-1" style={{ flex: 1, minWidth: 0 }}>
+        <div className="sk-row sk-gap-2" style={{ alignItems: "center", flexWrap: "wrap" }}>
+          <span className="sk-label-3">{roleLabel(p)}</span>
+          <Tag size="s" hue={p.kind === "system" ? "accent" : "special"}>{p.kind === "system" ? "Системная" : "Бизнес-роль"}</Tag>
+          {p.isPrimary && <Tag size="s" hue="positive" icon={<IconFlag size={12} />}>Основной</Tag>}
+          {p.required && <Tag size="s" hue="neutral">Обязательна</Tag>}
+        </div>
+        {assignedMode ? (
+          resolved ? (
+            <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>{resolved.name} · {resolved.position}</span>
+          ) : (
+            <span className="sk-label-4" style={{ color: "var(--sk-text-negative)" }}>Участник не назначен — выберите вручную</span>
+          )
+        ) : (
+          <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>{roleSource(p)}</span>
+        )}
+      </div>
+
+      {assignedMode ? (
+        !resolved && <Button size="s" variant="accent" onClick={onAssign}>Назначить</Button>
+      ) : (
+        <React.Fragment>
+          <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)", whiteSpace: "nowrap" }}>Задач: {taskCount}</span>
+          <Button size="s" mode="tertiary" onClick={onEdit}><IconEdit size={15} /></Button>
+          <Button size="s" mode="tertiary" onClick={onDelete}><IconTrash size={15} /></Button>
+        </React.Fragment>
+      )}
+    </div>
+  );
+}
+
+function AddParticipantModal({ existingRoleIds, onClose, onAdd }) {
+  const D = window.SITE_DATA;
+  const [kind, setKind] = React.useState("system");
+  const [roleId, setRoleId] = React.useState("");
+  const [required, setRequired] = React.useState(true);
+
+  const options = kind === "system"
+    ? (D.systemRoles || []).filter((r) => !existingRoleIds.system.includes(r.id))
+    : (D.businessRolesCatalog || []).filter((r) => !existingRoleIds.business.includes(r.id));
+
+  return (
+    <Modal open title="Добавить участника" onClose={onClose} size="s"
+      secondary={<Button mode="secondary" onClick={onClose}>Отменить</Button>}
+      primary={<Button variant="accent" disabled={!roleId} onClick={() => onAdd({ kind, roleId, required })}>Добавить</Button>}>
+      <div className="sk-col sk-gap-4">
+        <SegmentedControl size="m"
+          items={[{ id: "system", label: "Системная роль" }, { id: "business", label: "Бизнес-роль" }]}
+          active={kind} onChange={(v) => { setKind(v); setRoleId(""); }} />
+
+        {kind === "system" ? (
+          <div className="sk-col sk-gap-2">
+            <Select label="Роль" placeholder="Выберите роль" value={roleId}
+              options={options.map((r) => ({ value: r.id, label: r.label }))} onChange={setRoleId} />
+            {roleId && <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>
+              {(D.systemRoles.find((r) => r.id === roleId) || {}).source}
+            </span>}
+          </div>
+        ) : (
+          <Select label="Роль из справочника" placeholder="Выберите бизнес-роль" value={roleId}
+            options={options.map((r) => ({ value: r.id, label: r.label }))} onChange={setRoleId} />
+        )}
+
+        <div className="sk-row sk-gap-3 sk-clickable" onClick={() => setRequired((r) => !r)}>
+          <Checkbox checked={required} onChange={() => setRequired((r) => !r)} />
+          <div className="sk-col sk-gap-1">
+            <span className="sk-label-4">Обязательная роль</span>
+            <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>Без назначенного участника план не может быть выдан сотруднику</span>
+          </div>
+        </div>
+
+        {!options.length && <Alert hue="neutral">Все роли этого типа уже добавлены в шаблон.</Alert>}
+      </div>
+    </Modal>
+  );
+}
+
+function EditParticipantModal({ p, onClose, onSave }) {
+  const [required, setRequired] = React.useState(p.required);
+  const [isPrimary, setIsPrimary] = React.useState(!!p.isPrimary);
+  return (
+    <Modal open title={roleLabel(p)} onClose={onClose} size="s"
+      secondary={<Button mode="secondary" onClick={onClose}>Отменить</Button>}
+      primary={<Button variant="accent" onClick={() => onSave({ required, isPrimary })}>Сохранить</Button>}>
+      <div className="sk-col sk-gap-3">
+        <div className="sk-row sk-gap-3 sk-clickable" onClick={() => setRequired((r) => !r)}>
+          <Checkbox checked={required} onChange={() => setRequired((r) => !r)} />
+          <span className="sk-label-4">Обязательная роль</span>
+        </div>
+        {p.kind === "system" && (
+          <div className="sk-row sk-gap-3 sk-clickable" onClick={() => setIsPrimary((v) => !v)}>
+            <Checkbox checked={isPrimary} onChange={() => setIsPrimary((v) => !v)} />
+            <div className="sk-col sk-gap-1">
+              <span className="sk-label-4">Основной руководитель</span>
+              <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>Приоритетный для согласований, уведомлений и действий по плану</span>
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function DeleteParticipantBlockedModal({ p, count, onClose }) {
+  return (
+    <Modal open title="Нельзя удалить роль" onClose={onClose} size="s"
+      primary={<Button variant="accent" onClick={onClose}>Понятно</Button>}>
+      <span className="sk-label-3-regular">
+        На роль «{roleLabel(p)}» назначено задач: {count}. Сначала переназначьте их другой роли или удалите, потом можно будет удалить роль.
+      </span>
+    </Modal>
+  );
+}
+
+function ParticipantsBlock({ participants, tasks, assignedMode, onToggleMode, onAdd, onEdit, onDelete, onAssign }) {
+  const [addModal, setAddModal] = React.useState(false);
+  const [editTarget, setEditTarget] = React.useState(null);
+  const [deleteBlocked, setDeleteBlocked] = React.useState(null);
+
+  const existingRoleIds = {
+    system: participants.filter((p) => p.kind === "system").map((p) => p.roleId),
+    business: participants.filter((p) => p.kind === "business").map((p) => p.roleId),
+  };
+  function taskCount(p) { return tasks.filter((t) => t.assigneeParticipantId === p.id).length; }
+  function handleDelete(p) {
+    const count = taskCount(p);
+    if (count > 0) { setDeleteBlocked({ p, count }); return; }
+    onDelete(p.id);
+  }
+
+  return (
+    <Card bordered>
+      <div className="sk-col sk-gap-3">
+        <div className="sk-row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+          <div className="sk-col sk-gap-1">
+            <div className="sk-title-5">Участники плана</div>
+            <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>
+              {assignedMode ? "Так это будет выглядеть после назначения шаблона сотруднику" : "Роли, которым можно назначать задачи в этом шаблоне"}
+            </span>
+          </div>
+          <SegmentedControl size="s"
+            items={[{ id: "template", label: "Шаблон" }, { id: "assigned", label: "После назначения" }]}
+            active={assignedMode ? "assigned" : "template"} onChange={(v) => onToggleMode(v === "assigned")} />
+        </div>
+
+        {participants.length === 0 ? (
+          <div className="sk-col sk-gap-3" style={{ alignItems: "center", textAlign: "center", padding: "24px 16px", background: "var(--sk-surface-secondary)", borderRadius: "var(--sk-radius-3)" }}>
+            <span className="sk-label-3">Участники ещё не добавлены</span>
+            <span className="sk-muted" style={{ maxWidth: 380, font: "var(--sk-label-4-regular)" }}>
+              Добавьте системные роли (руководитель, HRBP…) и бизнес-роли (наставник, бадди…), которым можно будет назначать задачи в чек-листе и во вкладке «Задачи»
+            </span>
+            <Button variant="accent" icon={<IconPlusSm size={16} />} onClick={() => setAddModal(true)}>Добавить участника</Button>
+          </div>
+        ) : (
+          <React.Fragment>
+            {!assignedMode && (
+              <Alert hue="accent" style={{ background: "var(--sk-surface-secondary)" }}>
+                Если участников-руководителей несколько, отметьте одного основным — он приоритетный для согласований, уведомлений и действий по плану.
+              </Alert>
+            )}
+            <div className="sk-col sk-gap-2">
+              {participants.map((p) => (
+                <ParticipantRow key={p.id} p={p} assignedMode={assignedMode} taskCount={taskCount(p)}
+                  onEdit={() => setEditTarget(p)} onDelete={() => handleDelete(p)} onAssign={() => onAssign(p)} />
+              ))}
+            </div>
+            {!assignedMode && (
+              <Button mode="secondary" size="s" icon={<IconPlusSm size={16} />} style={{ alignSelf: "flex-start" }} onClick={() => setAddModal(true)}>
+                Добавить участника
+              </Button>
+            )}
+          </React.Fragment>
+        )}
+      </div>
+
+      {addModal && (
+        <AddParticipantModal existingRoleIds={existingRoleIds} onClose={() => setAddModal(false)}
+          onAdd={(form) => { onAdd(form); setAddModal(false); }} />
+      )}
+      {editTarget && (
+        <EditParticipantModal p={editTarget} onClose={() => setEditTarget(null)}
+          onSave={(patch) => { onEdit(editTarget.id, patch); setEditTarget(null); }} />
+      )}
+      {deleteBlocked && <DeleteParticipantBlockedModal {...deleteBlocked} onClose={() => setDeleteBlocked(null)} />}
+    </Card>
+  );
+}
+
+// ---------------- Вкладка "Описание" — основные данные шаблона + блок "Участники плана". ----------------
+const LOCATION_TYPE_OPTIONS = [
+  { value: "office", label: "Офис" },
+  { value: "remote", label: "Удалённо" },
+  { value: "hybrid", label: "Гибрид" },
+];
+
+function MetaField({ label, value }) {
+  if (!value) return null;
+  return (
+    <div className="sk-col sk-gap-1" style={{ minWidth: 140 }}>
+      <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>{label}</span>
+      <span className="sk-label-4">{value}</span>
+    </div>
+  );
+}
+
+function DescriptionSection({ template, name, description, durationDays, locationType, location,
+  onNameChange, onDescriptionChange, onDurationChange, onLocationTypeChange, onLocationChange,
+  participants, tasks, assignedPreview, onToggleAssignedPreview, onAddParticipant, onEditParticipant, onDeleteParticipant, onAssignPerson }) {
+  return (
+    <div className="sk-col sk-gap-4" style={{ padding: "20px 24px" }}>
+      <Card bordered>
+        <div className="sk-col sk-gap-4">
+          <div className="sk-title-5">Основные данные шаблона</div>
+          <Input label="Название" required value={name} onChange={(e) => onNameChange(e.target.value || "")} />
+          <Textarea label="Описание" rows={3} value={description} onChange={(e) => onDescriptionChange(e.target.value || "")} />
+          <div className="sk-row sk-gap-3">
+            <div className="sk-col sk-gap-1" style={{ flex: 1 }}>
+              <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>Тип плана</span>
+              <span className="sk-label-3">{template.planType}</span>
+            </div>
+            <Input label="Продолжительность (дней)" type="number" min={1} value={durationDays} style={{ flex: 1 }}
+              onChange={(e) => onDurationChange(Math.max(1, Number(e.target.value) || 1))} />
+          </div>
+          <div className="sk-row sk-gap-3">
+            <Select label="Тип рабочей локации" value={locationType} options={LOCATION_TYPE_OPTIONS} onChange={onLocationTypeChange} style={{ flex: 1 }} />
+            <Input label="Локация / адрес" value={location} onChange={(e) => onLocationChange(e.target.value || "")} style={{ flex: 2 }}
+              icon={<IconMapPin size={16} />} />
+          </div>
+          <Divider />
+          <div className="sk-row sk-gap-4" style={{ flexWrap: "wrap" }}>
+            <MetaField label="Категория" value={template.category} />
+            <MetaField label="Подразделение" value={template.department} />
+            <MetaField label="Функция" value={template.function} />
+            <MetaField label="Компания" value={template.company} />
+            <MetaField label="Автор" value={template.author} />
+            <MetaField label="Создан" value={template.createdAt} />
+          </div>
+        </div>
+      </Card>
+
+      <ParticipantsBlock participants={participants} tasks={tasks} assignedMode={assignedPreview}
+        onToggleMode={onToggleAssignedPreview} onAdd={onAddParticipant} onEdit={onEditParticipant}
+        onDelete={onDeleteParticipant} onAssign={onAssignPerson} />
+    </div>
+  );
+}
+
+// ---------------- Вкладка "Чек-лист" — этапы + элементы; у типа "Задача" появляется поле
+// "Исполнитель" со списком, собранным из участников плана (роль, не добавленная в
+// «Участники плана», физически не может попасть в список — источник данных сам ограничивает выбор). ----------------
+function ChecklistItemFormModal({ participants, onClose, onCreate }) {
+  const [type, setType] = React.useState("task");
+  const [title, setTitle] = React.useState("");
+  const [assignee, setAssignee] = React.useState("employee");
+  const [required, setRequired] = React.useState(true);
+  const [dueDays, setDueDays] = React.useState(7);
+
+  const assigneeOptions = [
+    { value: "employee", label: "Адаптируемый сотрудник" },
+    ...participants.map((p) => ({ value: p.id, label: roleLabel(p) })),
+  ];
+
+  function submit() {
+    onCreate({
+      type, title, required, dueDays,
+      assigneeParticipantId: type === "task" && assignee !== "employee" ? assignee : null,
+    });
+  }
+
+  return (
+    <Modal open title="Новый элемент чек-листа" onClose={onClose} size="s"
+      secondary={<Button mode="secondary" onClick={onClose}>Отменить</Button>}
+      primary={<Button variant="accent" disabled={!title.trim()} onClick={submit}>Добавить</Button>}>
+      <div className="sk-col sk-gap-3">
+        <Select label="Тип элемента" value={type}
+          options={CHECKLIST_ITEM_TYPES.map((id) => ({ value: id, label: ELEMENT_LABEL[id] }))} onChange={setType} />
+        <Input label="Название" required value={title} onChange={(e) => setTitle(e.target.value || "")} />
+        {type === "task" && (
+          <Select label="Исполнитель" value={assignee} options={assigneeOptions} onChange={setAssignee}
+            helper={participants.length ? "Можно выбрать только роль, добавленную в «Участники плана»" : "В шаблоне пока нет ролей — можно назначить только на сотрудника"} />
+        )}
+        <div className="sk-row sk-gap-3">
+          <Input label="Срок (дней от начала плана)" required type="number" min={1} value={dueDays} style={{ flex: 1 }}
+            onChange={(e) => setDueDays(Math.max(1, Number(e.target.value) || 1))} />
+          <div className="sk-row sk-gap-3 sk-clickable" style={{ flex: 1, alignItems: "center" }} onClick={() => setRequired((r) => !r)}>
+            <Checkbox checked={required} onChange={() => setRequired((r) => !r)} />
+            <span className="sk-label-4">Обязательный</span>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function ChecklistItemRow({ t, participants, onDelete }) {
+  const assignee = t.assigneeParticipantId ? participants.find((p) => p.id === t.assigneeParticipantId) : null;
+  const Icon = ELEMENT_ICON[t.type] || IconFileText;
+  return (
+    <div className="sk-row sk-gap-2" style={{
+      alignItems: "center", padding: "10px 12px", border: "1px solid var(--sk-stroke)", borderRadius: "var(--sk-radius-3)",
+      background: "var(--sk-surface-page)", flexWrap: "wrap",
+    }}>
+      <Icon size={16} color="var(--sk-icon-secondary)" />
+      <span className="sk-label-4" style={{ flex: 1, minWidth: 120 }}>{t.title}</span>
+      {t.type === "task" && (
+        <Tag size="s" hue={assignee ? "accent" : "special"}>{assignee ? roleLabel(assignee) : "Сотрудник"}</Tag>
+      )}
+      {t.required && <Tag size="s" hue="neutral">Обязательный</Tag>}
+      <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)", whiteSpace: "nowrap" }}>{dueDayLabel(t.dueDays)}</span>
+      <Tag size="s" hue="positive">Связана с этапом</Tag>
+      <Button size="s" mode="tertiary" onClick={onDelete}><IconTrash size={15} /></Button>
+    </div>
+  );
+}
+
+function ChecklistStageCard({ stage, tasks, participants, onAddTask, onDeleteTask }) {
+  const [formOpen, setFormOpen] = React.useState(false);
+  const stageTasks = tasks.filter((t) => t.stageId === stage.id);
+  return (
+    <Card bordered>
+      <div className="sk-col sk-gap-3">
+        <div className="sk-title-5">{stage.title}</div>
+        <div className="sk-col sk-gap-2">
+          {stageTasks.map((t) => <ChecklistItemRow key={t.id} t={t} participants={participants} onDelete={() => onDeleteTask(t.id)} />)}
+          {!stageTasks.length && <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>В этапе пока нет элементов</span>}
+        </div>
+        <Button size="s" mode="secondary" icon={<IconPlusSm size={16} />} style={{ alignSelf: "flex-start" }} onClick={() => setFormOpen(true)}>Добавить элемент</Button>
+      </div>
+      {formOpen && (
+        <ChecklistItemFormModal participants={participants} onClose={() => setFormOpen(false)}
+          onCreate={(form) => { onAddTask({ ...form, stageId: stage.id }); setFormOpen(false); }} />
+      )}
+    </Card>
+  );
+}
+
+function ChecklistSectionReal({ stages, tasks, participants, onAddStage, onAddTask, onDeleteTask }) {
+  const [newStageOpen, setNewStageOpen] = React.useState(false);
+  const [newStageTitle, setNewStageTitle] = React.useState("");
+  return (
+    <div className="sk-col sk-gap-3" style={{ padding: "20px 24px" }}>
+      {!stages.length && (
+        <Card>
+          <div className="sk-col sk-gap-2" style={{ alignItems: "center", textAlign: "center", padding: "24px 16px" }}>
+            <div className="sk-label-2">В шаблоне пока нет этапов</div>
+            <div className="sk-muted" style={{ maxWidth: 380 }}>Разбейте чек-лист на этапы (например, «Первая неделя», «Первый месяц») и добавляйте в них элементы</div>
+          </div>
+        </Card>
+      )}
+      {stages.map((s) => (
+        <ChecklistStageCard key={s.id} stage={s} tasks={tasks} participants={participants}
+          onAddTask={onAddTask} onDeleteTask={onDeleteTask} />
+      ))}
+      {newStageOpen ? (
+        <Card bordered>
+          <div className="sk-row sk-gap-2" style={{ alignItems: "center" }}>
+            <Input placeholder="Название этапа" value={newStageTitle} style={{ flex: 1 }} onChange={(e) => setNewStageTitle(e.target.value || "")} />
+            <Button variant="accent" size="s" disabled={!newStageTitle.trim()}
+              onClick={() => { onAddStage(newStageTitle.trim()); setNewStageTitle(""); setNewStageOpen(false); }}>Добавить</Button>
+            <Button mode="secondary" size="s" onClick={() => setNewStageOpen(false)}>Отменить</Button>
+          </div>
+        </Card>
+      ) : (
+        <Button mode="secondary" size="s" icon={<IconPlusSm size={16} />} style={{ alignSelf: "flex-start" }} onClick={() => setNewStageOpen(true)}>Добавить этап</Button>
+      )}
+    </div>
+  );
+}
+
+// ---------------- Вкладка "Задачи" — динамические блоки по ролям, добавленным в
+// «Участники плана»; блок не создаётся для роли, которой нет в шаблоне. Задача — та же
+// сущность, что и элемент чек-листа (см. комментарий вверху секции): здесь просто другой срез. ----------------
+function StandaloneTaskModal({ target, onClose, onCreate }) {
+  const [title, setTitle] = React.useState("");
+  const [description, setDescription] = React.useState("");
+  const [dueDays, setDueDays] = React.useState(14);
+  const [required, setRequired] = React.useState(true);
+  return (
+    <Modal open title={"Добавить задачу" + (target && target.label ? " · " + target.label : "")} onClose={onClose} size="s"
+      secondary={<Button mode="secondary" onClick={onClose}>Отменить</Button>}
+      primary={<Button variant="accent" disabled={!title.trim()} onClick={() => onCreate({ title, description, dueDays, required })}>Добавить</Button>}>
+      <div className="sk-col sk-gap-3">
+        <Input label="Название" required value={title} onChange={(e) => setTitle(e.target.value || "")} />
+        <Textarea label="Описание" rows={2} value={description} onChange={(e) => setDescription(e.target.value || "")} />
+        <Input label="Срок (дней от начала плана)" required type="number" min={1} value={dueDays}
+          onChange={(e) => setDueDays(Math.max(1, Number(e.target.value) || 1))} />
+        <div className="sk-row sk-gap-3 sk-clickable" onClick={() => setRequired((r) => !r)}>
+          <Checkbox checked={required} onChange={() => setRequired((r) => !r)} />
+          <span className="sk-label-4">Обязательная</span>
+        </div>
+        <Alert hue="neutral">Задача вне этапа — не связана с чек-листом{target && target.label ? ". Исполнитель: " + target.label : ""}</Alert>
+      </div>
+    </Modal>
+  );
+}
+
+function TaskGroupCard({ label, list, onAdd, onDelete }) {
+  return (
+    <Card bordered>
+      <div className="sk-col sk-gap-2">
+        <div className="sk-row sk-gap-2" style={{ alignItems: "center", justifyContent: "space-between" }}>
+          <span className="sk-label-2">{label}</span>
+          <div className="sk-row sk-gap-2" style={{ alignItems: "center" }}>
+            <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>Задач: {list.length}</span>
+            <Button size="s" mode="tertiary" icon={<IconPlusSm size={15} />} onClick={onAdd}>Добавить</Button>
+          </div>
+        </div>
+        {list.length ? list.map((t) => (
+          <div key={t.id} className="sk-row sk-gap-2" style={{ alignItems: "center", padding: "10px 12px", background: "var(--sk-surface-secondary)", borderRadius: "var(--sk-radius-2)", flexWrap: "wrap" }}>
+            <span className="sk-label-4" style={{ flex: 1, minWidth: 120 }}>{t.title}</span>
+            {t.stageTitle ? <Tag size="s" hue="positive">Этап: {t.stageTitle}</Tag> : <Tag size="s" hue="neutral">Вне этапа</Tag>}
+            <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)", whiteSpace: "nowrap" }}>{dueDayLabel(t.dueDays)}</span>
+            <Button size="s" mode="tertiary" onClick={() => onDelete(t.id)}><IconTrash size={15} /></Button>
+          </div>
+        )) : <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>Пока нет задач</span>}
+      </div>
+    </Card>
+  );
+}
+
+function TasksSectionReal({ tasks, participants, stages, onAddTask, onDeleteTask }) {
+  const [modalFor, setModalFor] = React.useState(null); // null | { assigneeParticipantId, label }
+
+  function stageTitleOf(t) { return t.stageId ? ((stages.find((s) => s.id === t.stageId) || {}).title || null) : null; }
+  const withStageTitle = (list) => list.map((t) => ({ ...t, stageTitle: stageTitleOf(t) }));
+
+  const employeeTasks = withStageTitle(tasks.filter((t) => !t.assigneeParticipantId));
+  const groups = participants.map((p) => ({ p, list: withStageTitle(tasks.filter((t) => t.assigneeParticipantId === p.id)) }));
+
+  return (
+    <div className="sk-col sk-gap-3" style={{ padding: "20px 24px" }}>
+      <div className="sk-row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>Блоки формируются динамически по ролям, добавленным в «Участники плана»</span>
+        <Button size="s" variant="accent" icon={<IconPlusSm size={16} />} onClick={() => setModalFor({ assigneeParticipantId: null, label: "Адаптируемый сотрудник" })}>
+          Добавить задачу
+        </Button>
+      </div>
+
+      {!participants.length && <Alert hue="neutral">Добавьте участников плана на вкладке «Описание», чтобы назначать им задачи</Alert>}
+
+      {/* Сначала блоки ролей-участников в порядке из «Участников плана», затем
+          «Адаптируемый сотрудник» — это бакет для задач без исполнителя, ему место
+          в конце. В плане контактного центра наверху должен быть наставник: именно его
+          задачи чаще всего не выполняются, и их надо видеть первыми. */}
+      {groups.map(({ p, list }) => (
+        <TaskGroupCard key={p.id} label={roleLabel(p)} list={list}
+          onAdd={() => setModalFor({ assigneeParticipantId: p.id, label: roleLabel(p) })} onDelete={onDeleteTask} />
+      ))}
+      <TaskGroupCard label="Адаптируемый сотрудник" list={employeeTasks}
+        onAdd={() => setModalFor({ assigneeParticipantId: null, label: "Адаптируемый сотрудник" })} onDelete={onDeleteTask} />
+
+      {modalFor && (
+        <StandaloneTaskModal target={modalFor} onClose={() => setModalFor(null)}
+          onCreate={(form) => {
+            onAddTask({ ...form, type: "task", stageId: null, assigneeParticipantId: modalFor.assigneeParticipantId });
+            setModalFor(null);
+          }} />
+      )}
+    </div>
+  );
+}
+
+function Page() {
+  const D = window.SITE_DATA;
+  const tplId = new URLSearchParams(window.location.search).get("tpl");
+  const baseTemplate = D.templates.find((t) => t.id === tplId) || D.templates[0];
+  const [section, setSection] = React.useState("goals");
+  const [enabled, setEnabled] = React.useState(baseTemplate.goalsEnabled);
+  const [owner, setOwner] = React.useState(baseTemplate.goalsOwner || "hr");
+  const [deadlineDays, setDeadlineDays] = React.useState(baseTemplate.goalsDeadlineDays);
+  const [reviewRequired, setReviewRequired] = React.useState(baseTemplate.goalsReviewRequired || false);
+  const [reviewDeadlineDays, setReviewDeadlineDays] = React.useState(baseTemplate.goalsReviewDeadlineDays || 7);
+  const [goals, setGoals] = React.useState(baseTemplate.goals || []);
+  const [checkpoints, setCheckpoints] = React.useState(baseTemplate.checkpoints || []);
+  const [deleteConfirm, setDeleteConfirm] = React.useState(false);
+
+  // ---- Описание: основные поля шаблона ----
+  const [name, setName] = React.useState(baseTemplate.name);
+  const [description, setDescription] = React.useState(baseTemplate.description);
+  const [durationDays, setDurationDays] = React.useState(baseTemplate.durationDays);
+  const [locationType, setLocationType] = React.useState(baseTemplate.locationType || "office");
+  const [location, setLocation] = React.useState(baseTemplate.location || "");
+
+  // ---- Участники плана, чек-лист (этапы) и задачи (ТЗ "Доработки прототипа_Задачи и Роли") ----
+  const [participants, setParticipants] = React.useState(baseTemplate.participants || []);
+  const [checklistStages, setChecklistStages] = React.useState(baseTemplate.checklistStages || []);
+  const [tasks, setTasks] = React.useState(baseTemplate.tasks || []);
+  const [assignedPreview, setAssignedPreview] = React.useState(false);
+  const [toast, setToast] = React.useState(null);
+
+  function showToast(msg) { setToast(msg); window.setTimeout(() => setToast(null), 2200); }
+
+  function addGoal(draft) {
+    setGoals((list) => [...list, { id: "tgoal" + Date.now(), ...draft }]);
+  }
+  function updateGoal(id, updater) {
+    setGoals((list) => list.map((g) => g.id === id ? updater(g) : g));
+  }
+  function deleteGoal(id) {
+    setGoals((list) => list.filter((g) => g.id !== id));
+  }
+
+  function addCheckpoint(form) {
+    setCheckpoints((list) => [...list, { id: "tcp" + Date.now(), ...form }]);
+  }
+  function editCheckpoint(id, form) {
+    setCheckpoints((list) => list.map((c) => c.id === id ? { ...c, ...form } : c));
+  }
+  function deleteCheckpoint(id) {
+    setCheckpoints((list) => list.filter((c) => c.id !== id));
+  }
+
+  // ---- Участники плана ----
+  function addParticipant(form) {
+    const isPrimary = form.kind === "system" && !participants.some((p) => p.kind === "system" && p.isPrimary);
+    setParticipants((list) => [...list, { id: "p" + Date.now(), ...form, isPrimary }]);
+    showToast("Участник добавлен");
+  }
+  function editParticipant(id, patch) {
+    setParticipants((list) => list.map((p) => {
+      if (p.id === id) return { ...p, ...patch };
+      if (patch.isPrimary && p.kind === "system") return { ...p, isPrimary: false };
+      return p;
+    }));
+  }
+  function deleteParticipant(id) {
+    setParticipants((list) => list.filter((p) => p.id !== id));
+    showToast("Участник удалён");
+  }
+
+  // ---- Чек-лист / Задачи — общий плоский список: stageId === null значит "вне этапа" ----
+  function addTask(form) {
+    setTasks((list) => [...list, { id: "tt" + Date.now(), ...form }]);
+    showToast(form.stageId ? "Элемент добавлен в этап" : "Задача добавлена");
+  }
+  function deleteTask(id) {
+    setTasks((list) => list.filter((t) => t.id !== id));
+  }
+  function addStage(title) {
+    setChecklistStages((list) => [...list, { id: "cs" + Date.now(), title }]);
+  }
+
+  const template = { ...baseTemplate, name, description, durationDays, locationType, location,
+    goalsEnabled: enabled, goalsOwner: owner, goalsDeadlineDays: deadlineDays,
+    goalsReviewRequired: reviewRequired, goalsReviewDeadlineDays: reviewDeadlineDays, goals };
+
+  return (
+    <AppShell role="hr" active="hr-templates" base=".."
+      breadcrumb={<a href="templates.html" className="sk-row sk-gap-1" style={{ color: "var(--sk-text-secondary)" }}><IconArrowLeft size={14} /> Шаблоны планов</a>}>
+      <div className="sk-col sk-gap-1">
+        <div className="sk-title-4">{template.name}</div>
+        <div className="sk-muted">{template.planType} · {template.durationDays} дней · {template.department}</div>
+      </div>
+
+      <div className="sk-row" style={{ alignItems: "flex-start", gap: 24 }}>
+        <PlanSectionsNav section={section} onChange={setSection} template={template} onDeleteTemplate={() => setDeleteConfirm(true)} />
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {section === "description" ? (
+            <DescriptionSection template={template} name={name} description={description} durationDays={durationDays}
+              locationType={locationType} location={location}
+              onNameChange={setName} onDescriptionChange={setDescription} onDurationChange={setDurationDays}
+              onLocationTypeChange={setLocationType} onLocationChange={setLocation}
+              participants={participants} tasks={tasks} assignedPreview={assignedPreview} onToggleAssignedPreview={setAssignedPreview}
+              onAddParticipant={addParticipant} onEditParticipant={editParticipant} onDeleteParticipant={deleteParticipant}
+              onAssignPerson={(p) => showToast("В реальном экране здесь откроется выбор сотрудника для роли «" + roleLabel(p) + "»")} />
+          ) : section === "goals" ? (
+            <GoalsSettingsCard template={template} enabled={enabled} owner={owner}
+              deadlineDays={deadlineDays} reviewRequired={reviewRequired} reviewDeadlineDays={reviewDeadlineDays}
+              goals={goals} checkpoints={checkpoints}
+              onToggle={(v) => {
+                setEnabled(v);
+                if (v) setOwner("hr");
+              }}
+              onOwnerChange={setOwner}
+              onDeadlineChange={setDeadlineDays}
+              onReviewRequiredChange={setReviewRequired}
+              onReviewDeadlineChange={setReviewDeadlineDays}
+              onAddGoal={addGoal} onUpdateGoal={updateGoal} onDeleteGoal={deleteGoal}
+              onAddCheckpoint={addCheckpoint} onEditCheckpoint={editCheckpoint} onDeleteCheckpoint={deleteCheckpoint} />
+          ) : section === "checklist" ? (
+            <ChecklistSectionReal stages={checklistStages} tasks={tasks} participants={participants}
+              onAddStage={addStage} onAddTask={addTask} onDeleteTask={deleteTask} />
+          ) : section === "tasks" ? (
+            <TasksSectionReal tasks={tasks} participants={participants} stages={checklistStages}
+              onAddTask={addTask} onDeleteTask={deleteTask} />
+          ) : (
+            <NotBuiltSection label={TEMPLATE_SECTIONS.find((s) => s.id === section).label} />
+          )}
+        </div>
+      </div>
+
+      {deleteConfirm && (
+        <Modal open title={null} onClose={() => setDeleteConfirm(false)} size="s"
+          secondary={<Button mode="secondary" onClick={() => setDeleteConfirm(false)}>Отменить</Button>}
+          primary={<Button variant="negative" onClick={() => { window.location.href = "templates.html"; }}>Удалить шаблон</Button>}>
+          <div className="sk-col sk-gap-2" style={{ alignItems: "center", textAlign: "center", padding: "8px 0" }}>
+            <div className="sk-label-2">Удалить шаблон «{template.name}»?</div>
+            <div className="sk-muted">Уже назначенные по этому шаблону индивидуальные планы не изменятся — шаблон живёт независимо от них.</div>
+          </div>
+        </Modal>
+      )}
+
+      {toast && (
+        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", zIndex: 100 }}>
+          <Snackbar>{toast}</Snackbar>
+        </div>
+      )}
+    </AppShell>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Page />);
+</script>
+</body>
+</html>

@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Вакансии — Skillaz Start</title>
+<link rel="stylesheet" href="../assets/styles.css" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<script src="../assets/ds_bundle.js"></script>
+<script src="../assets/data.js"></script>
+<script type="text/babel" src="../assets/shell.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { Card, Tag, Input, Button, Checkbox, Tabs, Snackbar, Tooltip } = window.SkillazCoreDesignSystem_bf9566;
+const { AppShell, Icons } = window.Site;
+const { IconSearch, IconMapPin, IconBriefcase, IconX, IconFilter, IconSparklesSolid, IconSettings, IconBell } = Icons;
+const D = window.SITE_DATA;
+
+// Раздел "Вакансии" у HR выглядит так же, как у Сотрудника (та же витрина, те же табы
+// "Вакансии" / "Мои отклики" — HR тоже может откликаться на другие внутренние вакансии).
+// "Мои отклики" ведёт на общую employee-страницу, т.к. отдельной HR-версии нет.
+// Доступ к таблице управления вакансиями — не отдельный таб, а ссылка-иконка справа
+// от табов (см. скрин витрины), сама управляемая страница вынесена в vacancies-manage.html.
+function HrVacanciesTabs({ active, responsesCount }) {
+  function go(id) {
+    if (id === active) return;
+    window.location.href = id === "showcase" ? "vacancies.html" : "../employee/my-responses.html";
+  }
+  return (
+    <div className="sk-row" style={{ justifyContent: "space-between", alignItems: "flex-end", borderBottom: "1px solid var(--sk-stroke)" }}>
+      <Tabs active={active} onChange={go} style={{ borderBottom: "none" }} items={[
+        { id: "showcase", label: "Вакансии" },
+        { id: "my-responses", label: "Мои отклики", count: responsesCount || undefined },
+      ]} />
+      <a href="vacancies-manage.html" className="sk-row sk-gap-1" style={{
+        textDecoration: "none", alignItems: "center", paddingBottom: 12,
+        color: "var(--sk-text-secondary)", font: "var(--sk-label-3)",
+      }}>
+        <IconSettings size={16} />Управление
+      </a>
+    </div>
+  );
+}
+
+// Локальные иконки в стилистике общего набора (mkIcon: viewBox 24, strokeWidth 1.5, currentColor).
+function IconThumbUp({ size = 24, color = "currentColor", style }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ color, flexShrink: 0, ...style }}>
+      <path d="M8 11v7a1 1 0 0 0 1 1h6.2a2 2 0 0 0 1.96-1.6l1-5a2 2 0 0 0-1.96-2.4H13l.5-3.2a1.6 1.6 0 0 0-3.1-.6L9 11H8Z"
+        stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M8 11H6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"
+        stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function fmtMoney(n) { return n.toLocaleString("ru-RU"); }
+function toOptions(list) { return list.map((v) => ({ value: v, label: v })); }
+
+const emptyFilters = { directions: [], positions: [], departments: [], experience: [], cities: [], formats: [], transitionTypes: [] };
+
+// Подпись бирки подписки в духе "Регион: Москва, Пермь +2" — короткая, без перечисления
+// всех значений сразу, чтобы бирка не растягивалась на всю ширину при большом наборе фильтров.
+const FILTER_LABELS = { directions: "Направление", positions: "Должность", departments: "Подразделение", experience: "Опыт", cities: "Регион", formats: "Формат", transitionTypes: "Тип перехода" };
+function summarizeFilters(filters) {
+  return Object.keys(FILTER_LABELS)
+    .filter((k) => filters[k].length)
+    .map((k) => `${FILTER_LABELS[k]}: ${filters[k].slice(0, 2).join(", ")}${filters[k].length > 2 ? ` +${filters[k].length - 2}` : ""}`)
+    .join(" · ");
+}
+// Сравнение по набору значений, а не по ссылке/порядку — один и тот же выбор фильтров,
+// собранный в разное время, должен давать одну подпись независимо от порядка выбора.
+function filtersSignature(filters) {
+  return JSON.stringify(Object.keys(FILTER_LABELS).map((k) => [...filters[k]].sort()));
+}
+
+// Подписка на уведомления по текущим фильтрам: компактная пилюля-кнопка (в духе job
+// alert на hh.ru/LinkedIn), сидит в одном ряду с "Найдено вакансий" справа. Клик сохраняет
+// снимок filters как отдельную подписку — если подписок несколько, они показаны бирками
+// ниже, каждую можно снять по отдельности. Без тогла — сам клик по пилюле переключает
+// подписку, второй клик снимает её же (см. правки по референсу из ДС).
+function SubscribeBar({ filters, hasActiveFilters, subscriptions, onSubscribe, onUnsubscribe }) {
+  const sig = filtersSignature(filters);
+  const isOn = hasActiveFilters && subscriptions.some((s) => s.sig === sig);
+  const btn = (
+    <button type="button" disabled={!hasActiveFilters}
+      onClick={() => (isOn ? onUnsubscribe(sig) : onSubscribe(sig, filters))}
+      className="sk-row sk-gap-2 sk-clickable" style={{
+        alignItems: "center", flexShrink: 0, height: 32, padding: "0 12px", border: "none",
+        borderRadius: 8, background: "var(--sk-surface-secondary)",
+        color: "var(--graphite-graphite-35)", font: "var(--sk-label-3-regular)", letterSpacing: "0.01em",
+        cursor: hasActiveFilters ? "pointer" : "default", opacity: hasActiveFilters ? 1 : 0.6, whiteSpace: "nowrap",
+      }}>
+      <IconBell size={15} color={isOn ? "var(--sk-icon-accent)" : "var(--sk-icon-secondary)"} />
+      {isOn ? "Вы подписаны" : "Подписаться на новые"}
+    </button>
+  );
+  if (hasActiveFilters) return btn;
+  return <Tooltip content="Выберите фильтр, чтобы подписаться на уведомления о новых вакансиях">{btn}</Tooltip>;
+}
+
+function SubscriptionsList({ subscriptions, onUnsubscribe }) {
+  if (!subscriptions.length) return null;
+  return (
+    <div className="sk-row sk-gap-2" style={{ flexWrap: "wrap" }}>
+      {subscriptions.map((s) => (
+        <span key={s.sig} className="sk-row sk-gap-1" style={{
+          alignItems: "center", padding: "5px 6px 5px 10px", borderRadius: "var(--sk-radius-full)",
+          border: "1px solid var(--sk-stroke)", font: "var(--sk-label-4-regular)", color: "var(--sk-text-secondary)",
+        }}>
+          <IconBell size={12} />{s.summary || "Все вакансии"}
+          <span onClick={() => onUnsubscribe(s.sig)} className="sk-clickable" style={{ display: "inline-flex", opacity: 0.55, padding: 2 }}>
+            <IconX size={12} />
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// Демо-значения ИИ-оценки соответствия для витрины — пока подбор считает не для всех
+// вакансий сразу, а только по запросу ("Вакансии для меня"), поэтому здесь фиксированные
+// проценты для пары карточек, чтобы показать сам вид индикатора.
+const DEMO_MATCH = { v1: 95, v2: 80 };
+
+// Бирка-саммари рядом с поиском: показывает общее число активных фильтров и разом
+// сбрасывает все — крестик виден только когда есть что сбрасывать. Клик по самой бирке
+// сворачивает/разворачивает ряд чипов ниже; по умолчанию ряд уже развёрнут.
+function FiltersSummaryChip({ count, open, onToggle, onReset }) {
+  const active = count > 0;
+  return (
+    <button type="button" onClick={onToggle} className="sk-clickable" style={{
+      display: "inline-flex", alignItems: "center", gap: 6, height: 40, padding: "0 14px",
+      borderRadius: "var(--sk-radius-form)", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
+      border: `1.5px solid ${active ? "var(--sk-stroke-accent)" : "var(--sk-stroke)"}`,
+      background: "var(--sk-surface-page)", font: "var(--sk-label-3-regular)",
+      color: "var(--sk-text-primary)",
+    }}>
+      <IconFilter size={16} />
+      Фильтры{active ? " " + count : ""}
+      {active && (
+        <span onClick={(e) => { e.stopPropagation(); onReset(); }} style={{ display: "inline-flex", color: "var(--sk-icon-secondary)" }}>
+          <IconX size={14} />
+        </span>
+      )}
+    </button>
+  );
+}
+
+// Единый чип-фильтр — пилюля со значением и крестиком, попап под ней открывает список
+// чекбоксов (плюс поиск для потенциально длинных справочников: Направление, Должность,
+// Подразделение). Для этих трёх первый пункт списка — "Моё …", закреплён и не пропадает
+// при поиске, чтобы им можно было воспользоваться в одно движение.
+function FilterChip({ label, options, value, onChange, searchable }) {
+  const [open, setOpen] = React.useState(false);
+  const [q, setQ] = React.useState("");
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  const pinned = searchable ? options[0] : null;
+  const rest = searchable ? options.slice(1) : options;
+  const needle = q.trim().toLowerCase();
+  const pinnedShown = !pinned || !needle || pinned.label.toLowerCase().includes(needle);
+  const restShown = needle ? rest.filter((o) => o.label.toLowerCase().includes(needle)) : rest;
+
+  function toggle(v) { onChange(value.includes(v) ? value.filter((x) => x !== v) : [...value, v]); }
+
+  const valueLabel = value.length === 1 ? (options.find((o) => o.value === value[0]) || {}).label : null;
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button type="button" onClick={() => setOpen((o) => !o)} className="sk-clickable" style={{
+        display: "inline-flex", alignItems: "center", gap: 6, height: 40, padding: "0 14px",
+        borderRadius: "var(--sk-radius-form)", cursor: "pointer", whiteSpace: "nowrap",
+        border: "1.5px solid var(--sk-stroke)",
+        background: "var(--sk-surface-page)", font: "var(--sk-label-3-regular)",
+        color: "var(--sk-text-primary)",
+      }}>
+        {label}
+        {valueLabel && <span style={{ color: "var(--sk-text-secondary)" }}>: {valueLabel}</span>}
+        {value.length > 1 && <span>{value.length}</span>}
+        <span onClick={(e) => { e.stopPropagation(); onChange([]); }} style={{ display: "inline-flex", color: "var(--sk-icon-secondary)" }}>
+          <IconX size={13} />
+        </span>
+      </button>
+      {open && (
+        <div className="sk-col sk-gap-1" style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 50, minWidth: 240, maxHeight: 320, overflowY: "auto",
+          background: "var(--sk-surface-page)", borderRadius: "var(--sk-radius-3)", boxShadow: "var(--sk-shadow-m)", padding: 8,
+        }}>
+          {searchable && (
+            <div style={{ position: "relative" }}>
+              <IconSearch size={13} style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", opacity: 0.45, pointerEvents: "none" }} />
+              <input type="text" autoFocus value={q} onChange={(e) => setQ(e.target.value || "")} placeholder="Поиск" style={{
+                width: "100%", height: 28, padding: "0 8px 0 26px", boxSizing: "border-box", borderRadius: "var(--sk-radius-2)",
+                border: "1px solid var(--sk-stroke)", background: "var(--sk-surface-page)",
+                font: "var(--sk-label-4-regular)", color: "var(--sk-text-primary)", outline: "none", marginBottom: 4,
+              }} />
+            </div>
+          )}
+          {pinned && pinnedShown && (
+            <label className="sk-row sk-gap-2" style={{
+              padding: "6px 4px", marginBottom: 2, cursor: "pointer", alignItems: "center",
+              borderBottom: "1px solid var(--sk-stroke)",
+            }}>
+              <Checkbox checked={value.includes(pinned.value)} onChange={() => toggle(pinned.value)} />
+              <span className="sk-label-4">{pinned.label}</span>
+            </label>
+          )}
+          {restShown.length ? restShown.map((o) => (
+            <label key={o.value} className="sk-row sk-gap-2" style={{ padding: "6px 4px", cursor: "pointer", alignItems: "center" }}>
+              <Checkbox checked={value.includes(o.value)} onChange={() => toggle(o.value)} />
+              <span className="sk-label-4-regular">{o.label}</span>
+            </label>
+          )) : (searchable && needle && !pinnedShown && (
+            <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)", padding: "6px 4px" }}>Ничего не найдено</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Ряд чипов — все фильтры видны сразу (без промежуточного шага "+ Фильтр"), значения
+// сразу показаны на самом чипе, а не спрятаны в закрытом поле сбоку.
+function FiltersChipsRow({ filters, onChange, directionOptions, positionOptions, departmentOptions }) {
+  const set = (key) => (v) => onChange((f) => ({ ...f, [key]: v }));
+  return (
+    <div className="sk-row sk-gap-2" style={{ flexWrap: "wrap" }}>
+      <FilterChip label="Направление" searchable options={directionOptions} value={filters.directions} onChange={set("directions")} />
+      <FilterChip label="Должность" searchable options={positionOptions} value={filters.positions} onChange={set("positions")} />
+      <FilterChip label="Подразделение" searchable options={departmentOptions} value={filters.departments} onChange={set("departments")} />
+      <FilterChip label="Опыт" options={toOptions(D.experienceOptions)} value={filters.experience} onChange={set("experience")} />
+      <FilterChip label="Регион" options={toOptions(D.cities)} value={filters.cities} onChange={set("cities")} />
+      <FilterChip label="Формат работы" options={toOptions(D.workFormats)} value={filters.formats} onChange={set("formats")} />
+      <FilterChip label="Тип перехода" options={toOptions(D.transitionTypes)} value={filters.transitionTypes} onChange={set("transitionTypes")} />
+    </div>
+  );
+}
+
+// matchPercent — демо-данные ИИ-оценки соответствия профилю сотрудника (см. computeMatchScore
+// ниже в shell.js); показывается тегом "Подходит на N%" в общем ряду с типом перехода.
+function VacancyCard({ vacancy, hasResponse, matchPercent }) {
+  const closed = vacancy.status === "closed";
+  const [hovered, setHovered] = React.useState(false);
+  return (
+    <a href={"../employee/vacancy.html?id=" + vacancy.id} style={{ textDecoration: "none" }}
+      onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+      <Card bordered
+        style={{
+          cursor: "pointer", height: "100%",
+          boxShadow: hovered ? "inset 0 0 0 1.5px var(--sk-stroke-accent)" : "inset 0 0 0 1px var(--sk-stroke)",
+        }}>
+        <div className="sk-col sk-gap-2" style={{ height: "100%" }}>
+          <div className="sk-row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+            <div className="sk-label-3">{vacancy.title}</div>
+            {hasResponse
+              ? <Tag size="s" hue="positive" icon={<IconThumbUp size={13} />}>Вы откликнулись</Tag>
+              : closed
+                ? <Tag size="s" hue="neutral">Закрыта</Tag>
+                : (vacancy.isNew && <Tag size="s" style={{ background: "var(--sk-accent)", color: "var(--sk-text-contrast)" }}>Новая</Tag>)}
+          </div>
+
+          <div className="sk-label-3-regular">
+            {vacancy.salaryFrom && vacancy.salaryTo ? `${fmtMoney(vacancy.salaryFrom)} – ${fmtMoney(vacancy.salaryTo)} ₽` : "По договорённости"}
+          </div>
+
+          <div className="sk-row sk-gap-2" style={{ flexWrap: "wrap" }}>
+            {matchPercent != null && (
+              <Tag size="s" icon={<IconSparklesSolid size={12} />} style={{ background: "var(--sk-special-secondary)", color: "rgb(117,59,233)" }}>
+                Подходите на {Math.round(matchPercent)}%
+              </Tag>
+            )}
+            <Tag size="s" hue="gray">{vacancy.transitionType}</Tag>
+          </div>
+
+          <div className="sk-row sk-gap-2 sk-muted" style={{ font: "var(--sk-label-4-regular)", flexWrap: "wrap" }}>
+            <span className="sk-row sk-gap-1"><IconMapPin size={13} />{vacancy.city}</span>
+            <span className="sk-row sk-gap-1"><IconBriefcase size={13} />{vacancy.department}</span>
+          </div>
+        </div>
+      </Card>
+    </a>
+  );
+}
+
+function Page() {
+  // Сотрудник видит только опубликованные HR-ом вакансии (visibleToEmployees) — вручную
+  // созданные и ещё не опубликованные HR-ом вакансии на витрине не показываются, ровно
+  // как задумано в разделе HR "Вакансии" (переключатель "Опубликована / Скрыта").
+  const visibleVacancies = React.useMemo(() => D.vacancies.filter((v) => v.visibleToEmployees !== false), []);
+  const responses = D.myResponses;
+  const respondedIds = React.useMemo(() => new Set(responses.map((r) => r.vacancyId)), [responses]);
+
+  const [q, setQ] = React.useState("");
+  const [filters, setFilters] = React.useState(emptyFilters);
+  const [filtersOpen, setFiltersOpen] = React.useState(true);
+  const [subscriptions, setSubscriptions] = React.useState([]);
+  const [toast, setToast] = React.useState(null);
+  function showToast(msg) { setToast(msg); window.setTimeout(() => setToast(null), 3200); }
+  function subscribe(sig, f) {
+    setSubscriptions((subs) => [...subs.filter((s) => s.sig !== sig), { sig, summary: summarizeFilters(f) }]);
+    showToast("Готово! Пришлём уведомление на почту и в личный кабинет, как только появится подходящая вакансия.");
+  }
+  function unsubscribe(sig) {
+    setSubscriptions((subs) => subs.filter((s) => s.sig !== sig));
+    showToast("Подписка отключена.");
+  }
+
+  // "Моё подразделение" / "Моя должность" закреплены первым пунктом списка — значение
+  // совпадает с реальным department/title вакансии, поэтому фильтрация ниже не требует
+  // особого случая для этого пункта, а сам пункт исключается из общего алфавитного списка,
+  // чтобы не дублироваться.
+  const departmentOptions = React.useMemo(() => {
+    const rest = [...new Set(visibleVacancies.map((v) => v.department))].filter((d) => d !== D.person.department).sort();
+    return [{ value: D.person.department, label: "Моё подразделение" }, ...toOptions(rest)];
+  }, [visibleVacancies]);
+  const positionOptions = React.useMemo(() => {
+    const rest = [...new Set(visibleVacancies.map((v) => v.title))].filter((t) => t !== D.person.position).sort();
+    return [{ value: D.person.position, label: "Моя должность" }, ...toOptions(rest)];
+  }, [visibleVacancies]);
+  const directionOptions = React.useMemo(() => {
+    const rest = D.directions.filter((d) => d !== D.person.direction);
+    return [{ value: D.person.direction, label: "Моё направление" }, ...toOptions(rest)];
+  }, []);
+
+  const needle = q.trim().toLowerCase();
+  const filtered = visibleVacancies.filter((v) => {
+    if (v.status === "closed") return false;
+    if (filters.directions.length && !filters.directions.includes(v.direction)) return false;
+    if (filters.positions.length && !filters.positions.includes(v.title)) return false;
+    if (filters.departments.length && !filters.departments.includes(v.department)) return false;
+    if (filters.experience.length && !filters.experience.includes(v.experience)) return false;
+    if (filters.cities.length && !filters.cities.includes(v.city)) return false;
+    if (filters.formats.length && !filters.formats.includes(v.format)) return false;
+    if (filters.transitionTypes.length && !filters.transitionTypes.includes(v.transitionType)) return false;
+    if (needle && !v.title.toLowerCase().includes(needle) && !v.department.toLowerCase().includes(needle)) return false;
+    return true;
+  });
+
+  const activeFilterCount = filters.directions.length + filters.positions.length + filters.departments.length + filters.experience.length
+    + filters.cities.length + filters.formats.length + filters.transitionTypes.length;
+  const hasActiveFilters = activeFilterCount > 0;
+
+  return (
+    <AppShell role="hr" active="vacancies" base="..">
+      <div className="sk-title-3">Откройте новые карьерные возможности</div>
+      <HrVacanciesTabs active="showcase" responsesCount={responses.length} />
+
+      <div className="sk-col sk-gap-3">
+        <div className="sk-row sk-gap-2" style={{ alignItems: "center", flexWrap: "wrap" }}>
+          <Input size="s" icon={<IconSearch size={20} />} placeholder="Поиск"
+            value={q} onChange={(e) => setQ(e.target.value || "")} style={{ width: 400, flexShrink: 0 }} />
+          <FiltersSummaryChip count={activeFilterCount} open={filtersOpen} onToggle={() => setFiltersOpen((o) => !o)} onReset={() => setFilters(emptyFilters)} />
+          {/* Поиск с AI: открывает общий дровер-помощник (см. AiAssistantWidget в assets/shell.js)
+              и сразу прогоняет запрос подбора, чтобы список подходящих вакансий появился без
+              дополнительного клика по чипу внутри чата. */}
+          <Button style={{ background: "var(--sk-special-secondary)", color: "rgb(117,59,233)", fontWeight: 500 }} icon={<IconSparklesSolid size={16} />}
+            onClick={() => window.__skAiOpenAssistant && window.__skAiOpenAssistant("Подходящие мне вакансии")}>
+            Вакансии для меня
+          </Button>
+        </div>
+
+        {filtersOpen && (
+          <FiltersChipsRow filters={filters} onChange={setFilters}
+            directionOptions={directionOptions} positionOptions={positionOptions} departmentOptions={departmentOptions} />
+        )}
+
+        <div className="sk-row" style={{ alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginTop: "var(--sk-space-2)" }}>
+          <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>Найдено вакансий: {filtered.length}</div>
+          <SubscribeBar filters={filters} hasActiveFilters={hasActiveFilters} subscriptions={subscriptions}
+            onSubscribe={subscribe} onUnsubscribe={unsubscribe} />
+        </div>
+
+        <SubscriptionsList subscriptions={subscriptions} onUnsubscribe={unsubscribe} />
+
+        {filtered.length === 0 ? (
+          <Card><div className="sk-muted" style={{ textAlign: "center", padding: "24px 0" }}>Ничего не нашлось по заданным условиям.</div></Card>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16 }}>
+            {filtered.map((v) => (
+              <VacancyCard key={v.id} vacancy={v} hasResponse={respondedIds.has(v.id)} matchPercent={DEMO_MATCH[v.id]} />
+            ))}
+          </div>
+        )}
+      </div>
+      {toast && (
+        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", zIndex: 100 }}>
+          <Snackbar>{toast}</Snackbar>
+        </div>
+      )}
+    </AppShell>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Page />);
+</script>
+</body>
+</html>

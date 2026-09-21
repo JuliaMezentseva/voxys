@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Я рекомендую — Skillaz Start</title>
+<link rel="stylesheet" href="../assets/styles.css" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<script src="../assets/ds_bundle.js"></script>
+<script src="../assets/data.js"></script>
+<script type="text/babel" src="../assets/shell.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { Card, Tag, Tabs, Divider, Avatar } = window.SkillazCoreDesignSystem_bf9566;
+const { AppShell, Icons } = window.Site;
+const { IconFileText, IconPhone, IconMapPin } = Icons;
+const D = window.SITE_DATA;
+
+function fmtMoney(n) { return n.toLocaleString("ru-RU"); }
+
+const RU_MONTHS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+function fmtRuDate(d) {
+  const [day, month, year] = d.split(".");
+  return `${parseInt(day, 10)} ${RU_MONTHS[parseInt(month, 10) - 1]} 20${year}`;
+}
+
+// Тот же переключатель, что на employee/vacancies.html и employee/my-responses.html —
+// три страницы, поэтому onChange меняет location, а не состояние.
+function EmployeeVacanciesTabs({ active, responsesCount, referralsCount }) {
+  function go(id) {
+    if (id === active) return;
+    window.location.href = id === "showcase" ? "vacancies.html" : id === "my-responses" ? "my-responses.html" : "my-referrals.html";
+  }
+  return (
+    <Tabs active={active} onChange={go} items={[
+      { id: "showcase", label: "Вакансии" },
+      { id: "my-responses", label: "Мои отклики", count: responsesCount || undefined },
+      { id: "my-referrals", label: "Я рекомендую", count: referralsCount || undefined },
+    ]} />
+  );
+}
+
+// Резюме кандидата в контуре не хранится как настоящий файл — при скачивании собираем
+// текстовый слепок из тех же данных, что уже показаны (тот же приём, что в my-responses.html).
+function downloadResumeStub(name, referral) {
+  const lines = [referral.candidateName, referral.city + " · " + referral.phone, "", "Файл: " + name, "",
+    "Рекомендует: " + D.person.name + " (" + D.person.position + ")", "Кем приходится: " + referral.relation, "",
+    "Причина рекомендации:", referral.reason];
+  const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name.replace(/\.pdf$/i, "") + ".txt";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function ResumeCard({ name, size, referral }) {
+  return (
+    <div className="sk-row sk-gap-3 sk-clickable" onClick={(e) => { e.preventDefault(); e.stopPropagation(); downloadResumeStub(name, referral); }} style={{
+      alignItems: "center", padding: "12px 14px", borderRadius: "var(--sk-radius-3)",
+      border: "1px solid var(--sk-stroke)", background: "var(--sk-surface-page)", maxWidth: 320,
+    }}>
+      <div style={{
+        width: 36, height: 36, borderRadius: "var(--sk-radius-2)", flexShrink: 0,
+        display: "flex", alignItems: "center", justifyContent: "center", background: "var(--sk-accent-secondary)",
+      }}><IconFileText size={18} color="var(--sk-icon-accent)" /></div>
+      <div className="sk-col" style={{ flex: 1, gap: 0, minWidth: 0 }}>
+        <div className="sk-label-4" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+        {size && <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>{size}</div>}
+      </div>
+    </div>
+  );
+}
+
+// Карточка рекомендации построена как карточка отклика в "Моих откликах": сверху вакансия
+// и тег состояния, ниже — то, что сотрудник сам отправил рекрутёру. Отличие одно и главное:
+// в отклике "кандидат" — сам сотрудник, а здесь это другой человек, поэтому блок кандидата
+// вынесен наверх карточки, а не спрятан в текст.
+function ReferralRow({ r }) {
+  const v = D.vacancies.find(x => x.id === r.vacancyId);
+  if (!v) return null;
+  const closed = v.status === "closed";
+  const [hovered, setHovered] = React.useState(false);
+  return (
+    <a href={"vacancy.html?id=" + v.id} style={{ textDecoration: "none" }}
+      onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+      <Card bordered style={{ cursor: "pointer", boxShadow: hovered ? "inset 0 0 0 1.5px var(--sk-stroke-accent)" : "inset 0 0 0 1px var(--sk-stroke)" }}>
+        <div className="sk-col sk-gap-3" style={{ opacity: closed ? 0.7 : 1 }}>
+          <div className="sk-row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div className="sk-col sk-gap-1">
+              <div className="sk-label-2">{v.title}</div>
+              <div className="sk-label-3-regular">
+                {v.salaryFrom && v.salaryTo ? `${fmtMoney(v.salaryFrom)} – ${fmtMoney(v.salaryTo)} ₽` : "По договорённости"}
+              </div>
+              <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>{v.city} · {v.department}</div>
+            </div>
+            <Tag size="s" hue={closed ? "neutral" : "positive"}>{closed ? "Вакансия закрыта" : "Рекомендация отправлена"}</Tag>
+          </div>
+
+          <Divider />
+
+          <div className="sk-col sk-gap-3">
+            <div className="sk-row sk-gap-3" style={{ alignItems: "center" }}>
+              <Avatar name={r.candidateName} size={36} />
+              <div className="sk-col" style={{ gap: 0, minWidth: 0 }}>
+                <div className="sk-label-3">{r.candidateName}</div>
+                <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>{r.relation}</div>
+              </div>
+            </div>
+            <div className="sk-row sk-gap-4" style={{ flexWrap: "wrap" }}>
+              <span className="sk-row sk-gap-1" style={{ alignItems: "center" }}>
+                <IconMapPin size={15} color="var(--sk-icon-secondary)" />
+                <span className="sk-label-4-regular">{r.city}</span>
+              </span>
+              {/* Телефон — единственное здесь, чем сотрудник реально пользуется руками
+                  (позвонить, скопировать, продиктовать рекрутёру), поэтому выделен
+                  акцентным цветом, как контакты рекрутёра на карточке вакансии. */}
+              <span className="sk-row sk-gap-1" style={{ alignItems: "center" }}>
+                <IconPhone size={15} color="var(--sk-icon-accent)" />
+                <span className="sk-label-4-regular" style={{ color: "var(--sk-text-accent)" }}>{r.phone}</span>
+              </span>
+            </div>
+            <div className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>Отправлено {fmtRuDate(r.date)}</div>
+            <div className="sk-label-3-regular" style={{ color: "var(--sk-text-primary)", whiteSpace: "pre-wrap" }}>{r.reason}</div>
+            {r.resumeFile && <ResumeCard name={r.resumeFile} size={r.resumeSize} referral={r} />}
+          </div>
+        </div>
+      </Card>
+    </a>
+  );
+}
+
+function Page() {
+  const responses = D.myResponses;
+  const referrals = D.myReferrals;
+  return (
+    <AppShell role="employee" active="vacancies" base="..">
+      <div className="sk-title-3">Откройте новые карьерные возможности</div>
+      <EmployeeVacanciesTabs active="my-referrals" responsesCount={responses.length} referralsCount={referrals.length} />
+
+      <div className="sk-col sk-gap-2">
+        <div className="sk-muted">Кандидаты, которых вы порекомендовали на вакансии. Рекомендацию ведёт рекрутёр вакансии — он свяжется с кандидатом сам и напишет вам, если понадобятся детали.</div>
+      </div>
+      <div className="sk-col sk-gap-3">
+        {referrals.length === 0 && (
+          <Card><div className="sk-col sk-gap-2" style={{ textAlign: "center", padding: "16px 0" }}>
+            <div className="sk-label-3">Вы пока никого не рекомендовали</div>
+            <div className="sk-muted">Откройте подходящую вакансию и нажмите «Рекомендовать» — форма займёт пару минут.</div>
+          </div></Card>
+        )}
+        {referrals.map((r, i) => <ReferralRow key={i} r={r} />)}
+      </div>
+    </AppShell>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Page />);
+</script>
+</body>
+</html>
