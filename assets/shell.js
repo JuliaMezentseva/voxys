@@ -873,7 +873,10 @@ function aiFaqExpand(q) {
 }
 
 function aiFaqLookup(plan, q) {
-  const faq = (plan && plan.faq) || [];
+  // Во вкладке FAQ у сотрудника — 15 главных карточек, чтобы экран не превращался
+  // в справочник. Помощник ищет шире: faq + faqExtra, поэтому отвечает и на редкие
+  // вопросы, которые не стоит выносить на видное место.
+  const faq = ((plan && plan.faq) || []).concat((plan && plan.faqExtra) || []);
   if (!faq.length) return null;
   const tokens = aiFaqExpand(q)
     .split(/[^a-zа-яё0-9ё]+/i)
