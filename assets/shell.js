@@ -834,6 +834,73 @@ function aiEmployeePlanActiveSubgoals(plan) {
 function aiEmployeePlanUrgentChecklist(plan) {
   return plan.stages.flatMap((s) => s.items.filter((i) => i.kind !== "checkpoint" && !i.done && i.highlight === "warning"));
 }
+// ---------------- Поиск по FAQ плана ----------------
+// Наставники в контакт-центре перегружены — это подтверждают отзывы сотрудников
+// («огромная загруженность наставников»). Поэтому вопрос, который новичок задал бы
+// наставнику, должен закрываться без него. Помощник не держит собственную базу:
+// он ищет по тем же карточкам FAQ, которые сотрудник видит во вкладке плана, —
+// один источник правды, и его наполняет заказчик, а не разработчик.
+// Синонимы нужны потому, что в чат пишут разговорно («клиент послал»),
+// а в FAQ формулировки нейтральные («оскорбления»).
+const AI_FAQ_SYNONYMS = [
+  { when: ["мат", "оскорб", "груб", "хам", "кричит", "орет", "орёт", "послал", "нецензур", "обозвал"], add: "оскорбления грубит" },
+  { when: ["угрож", "угроз", "жалоб", "суд", "прокурат"], add: "угрожает жалобой" },
+  { when: ["плач", "истер", "горе", "болен", "умер"], add: "плачет тяжёлая ситуация" },
+  { when: ["руководит", "старшего", "начальник"], add: "требует руководителя" },
+  { when: ["не знаю", "незнаю", "нет в скрипте", "не нашёл", "не нашел"], add: "скрипте базе знаний уточню" },
+  { when: ["сбой", "завис", "оборвал", "отключ"], add: "зависла оборвался" },
+  { when: ["ошиб", "напутал", "неправильно сказал", "неверно сказал"], add: "неверное исправить" },
+  { when: ["идентифик", "персональн", "паспорт", "чужие данные"], add: "идентификацию данные" },
+  { when: ["очеред", "затян", "долго говор"], add: "затянулся очередь" },
+  { when: ["страшно", "боюсь", "волну", "первый звонок"], add: "страшно первым звонком" },
+  { when: ["наставник", "никто не отвеч"], add: "наставник занят" },
+  { when: ["преми", "зарплат", "деньг", "выплат", "оплачив", "доход"], add: "доход премия оплачивается" },
+  { when: ["метрик", "оцен", "балл", "прослушк", "норматив"], add: "оценка метрикам баллов норматив" },
+  { when: ["перерыв", "график"], add: "перерывы расписанию" },
+  { when: ["дистанц", "удалён", "удален", "из дома"], add: "дистанционно супервайзер" },
+  { when: ["проект законч", "другой проект", "переве"], add: "проект закончится" },
+  { when: ["тестирован", "экзамен", "аттест", "допуск"], add: "тестирование обучения" },
+  { when: ["пропустил", "прогул", "заболел"], add: "пропустил обучения" },
+];
+// Слова, которые встречаются почти в каждой карточке и поэтому ничего не различают.
+const AI_FAQ_STOP = ["клиент", "делать", "нужно", "можно", "когда", "почему", "какой", "какие",
+  "этот", "если", "чтобы", "будет", "план", "плана", "работа", "работе", "сотрудник", "смены", "свой"];
+
+function aiFaqExpand(q) {
+  let out = q;
+  AI_FAQ_SYNONYMS.forEach((syn) => { if (syn.when.some((w) => q.indexOf(w) !== -1)) out += " " + syn.add; });
+  return out;
+}
+
+function aiFaqLookup(plan, q) {
+  const faq = (plan && plan.faq) || [];
+  if (!faq.length) return null;
+  const tokens = aiFaqExpand(q)
+    .split(/[^a-zа-яё0-9ё]+/i)
+    .filter((t) => t.length >= 4 && AI_FAQ_STOP.indexOf(t) === -1);
+  if (!tokens.length) return null;
+  const stem = (t) => t.slice(0, Math.max(4, t.length - 2));
+  const scored = faq.map((f) => {
+    const inQ = f.q.toLowerCase(), hay = (f.q + " " + f.a).toLowerCase();
+    let score = 0;
+    tokens.forEach((t) => {
+      const st = stem(t);
+      if (hay.indexOf(st) !== -1) score += 1;
+      if (inQ.indexOf(st) !== -1) score += 1; // совпадение в самом вопросе весит вдвое
+    });
+    return { f, score };
+  }).filter((x) => x.score >= 3).sort((a, b) => b.score - a.score);
+  if (!scored.length) return null;
+  const best = scored[0].f;
+  return {
+    text: best.q + "\n\n" + best.a,
+    results: scored.slice(1, 3).map((x, i) => ({
+      id: "faq-" + i, title: x.f.q, subtitle: "Ещё в FAQ плана",
+      actions: [{ kind: "query", label: "Показать ответ", query: x.f.q }],
+    })),
+  };
+}
+
 function aiEmployeePlanIntent(queryRaw) {
   const D = window.SITE_DATA;
   const plan = aiEmployeePlanCurrent();
@@ -923,6 +990,11 @@ function aiEmployeePlanIntent(queryRaw) {
       results,
     };
   }
+
+  // Всё, что не про навигацию по плану, пробуем ответить из FAQ — это и есть
+  // разгрузка наставника: вопрос закрывается там же, где задан.
+  const fromFaq = aiFaqLookup(plan, q);
+  if (fromFaq) return fromFaq;
 
   return null;
 }
@@ -1139,6 +1211,9 @@ function aiEmployeeHomeIntent(queryRaw) {
       results,
     };
   }
+  const fromFaq = aiFaqLookup(aiEmployeePlanCurrent(), q);
+  if (fromFaq) return fromFaq;
+
   return null;
 }
 
@@ -1182,7 +1257,7 @@ const AI_PAGE_CONFIG = {
     resolve: aiEmployeeVacancyIntent,
   },
   "employee-plan": {
-    chips: ["Что мне сделать сегодня?", "Подготовиться к контрольной точке", "Что у меня в работе?", "Что сейчас на проверке?"],
+    chips: ["Что мне сделать сегодня?", "Клиент грубит — что делать?", "Где искать ответ, если наставник занят?", "Что у меня в работе?", "Что сейчас на проверке?"],
     resolve: aiEmployeePlanIntent,
   },
 };
