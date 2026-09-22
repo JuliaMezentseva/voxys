@@ -627,7 +627,7 @@ const goalsSubDone = plan.goals.reduce((n, g) => n + g.subgoals.filter((s) => s.
 // Карточки целей изначально свёрнуты — виден только заголовок, статус и прогресс, без
 // списка шагов; шаги открываются по клику на шеврон (тот же паттерн, что у сотрудника).
 function ManagerGoalRow({ goal, plan, highlighted, onOpenGoal, onOpenSubgoal, onOpenMaterials, onDeleteGoal }) {
-  const { pct } = goalProgress(goal);
+  const { done, total, pct } = goalProgress(goal);
   const statusVal = deriveGoalStatus(goal);
   const [stepsOpen, setStepsOpen] = React.useState(false);
   return (
@@ -642,7 +642,7 @@ function ManagerGoalRow({ goal, plan, highlighted, onOpenGoal, onOpenSubgoal, on
           <div className="sk-label-2" style={{ color: "var(--sk-text-primary)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{goal.title || "Без названия"}</div>
           <div className="sk-row sk-gap-2" style={{ alignItems: "center", marginTop: 4 }}>
             <ProgressBar value={pct} height={6} style={{ width: 160 }} hue="positive" />
-            <span className="sk-label-3">{pct}%</span>
+            <span className="sk-label-3">{done} из {total} {total === 1 ? "шага" : "шагов"}</span>
             <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)", marginLeft: 16, whiteSpace: "nowrap" }}>до {stripDuePrefix(goal.dueLabel) || "срок не задан"}</span>
           </div>
         </div>

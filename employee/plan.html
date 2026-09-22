@@ -108,6 +108,12 @@ function goalProgress(goal) {
   const done = goal.subgoals.filter((s) => s.status === "done").length;
   return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
 }
+// Проценты по цели человеку ничего не говорят: «33%» не подсказывает, что сделано
+// и сколько осталось. Показываем то же самое штуками — «1 из 3 шагов».
+function goalProgressLabel(goal) {
+  const { done, total } = goalProgress(goal);
+  return done + " из " + total + " " + (total === 1 ? "шага" : "шагов");
+}
 // Статус цели не хранится и не выставляется вручную — он всегда считается по статусам
 // подцелей (в работу берут подцели, а не цель целиком): не начата, пока ни одна подцель не
 // сдвинулась с места; выполнена, когда все (не отменённые) подцели выполнены; во всех
@@ -237,7 +243,7 @@ function GoalRow({ goal, plan, onOpenGoal, onOpenSubgoal, onTakeSubgoal }) {
           <div className="sk-label-2" style={{ color: "var(--sk-text-primary)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{goal.title}</div>
           <div className="sk-row sk-gap-2" style={{ alignItems: "center", marginTop: 4 }}>
             <ProgressBar value={pct} height={6} style={{ width: 160 }} hue="positive" />
-            <span className="sk-label-3">{pct}%</span>
+            <span className="sk-label-3">{goalProgressLabel(goal)}</span>
             <span className="sk-muted" style={{ font: "var(--sk-label-4-regular)", marginLeft: 16, whiteSpace: "nowrap" }}>до {stripDuePrefix(goal.dueLabel)}</span>
           </div>
         </div>
@@ -348,7 +354,7 @@ function GoalDrawer({ goal, plan, onClose, onOpenSubgoal, onTakeSubgoal, onToggl
             <ParamRow label="Прогресс">
               <div className="sk-row sk-gap-2" style={{ alignItems: "center" }}>
                 <ProgressBar value={pct} style={{ width: 100 }} hue="positive" />
-                <span className="sk-label-4">{pct}%</span>
+                <span className="sk-label-4">{goalProgressLabel(goal)}</span>
               </div>
             </ParamRow>
             <ParamRow label="Статус"><StatusTag status={statusVal} /></ParamRow>
