@@ -258,6 +258,18 @@ function GoalRow({ goal, plan, onOpenGoal, onOpenSubgoal, onTakeSubgoal }) {
       <div className="sk-row sk-gap-3" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
         <div className="sk-col sk-gap-2" style={{ flex: 1, minWidth: 0 }}>
           <div className="sk-label-2" style={{ color: "var(--sk-text-primary)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{goal.title}</div>
+          {/* Требования цели числами — видны на карточке, без раскрытия:
+              прозрачность требований и есть половина ответа на жалобу
+              сотрудников о «непонятной системе оценивания». */}
+          {goal.metrics && goal.metrics.length > 0 && (
+            <div className="sk-row" style={{ flexWrap: "wrap", rowGap: 2 }}>
+              {goal.metrics.map((m, i) => (
+                <span key={i} className="sk-muted" style={{ font: "var(--sk-label-4-regular)" }}>
+                  {i > 0 && <span style={{ margin: "0 6px", color: "var(--sk-text-tertiary)" }}>·</span>}{m}
+                </span>
+              ))}
+            </div>
+          )}
           <div className="sk-row sk-gap-2" style={{ alignItems: "center", marginTop: 4 }}>
             <ProgressBar value={pct} height={6} style={{ width: 160 }} hue="positive" />
             <span className="sk-label-3">{pct}%</span>
